@@ -11,11 +11,20 @@ async def agent_ask(payload: AgentAskRequest, agent_service: AgentServiceDep):
     result = await agent_service.run(
         question=payload.question,
         session_id=payload.session_id,
-        user_id = "2"
+        user_id=payload.user_id,
     )
     return AgentAskResponse(
         status=result.status,
         answer=result.answer,
         steps=result.steps,
         tools_used=result.tools_used,
+        citations=[
+            {
+                "source": citation.source,
+                "doc_id": citation.doc_id,
+                "chunk_id": citation.chunk_id,
+                "snippet": citation.snippet,
+            }
+            for citation in result.citations
+        ],
     )
