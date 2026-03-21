@@ -1,3 +1,3 @@
-from src.agents.service import AgentResult, AgentService
+from src.agents.service import AgentCitation, AgentResult, AgentService
 
-__all__ = ["AgentResult", "AgentService"]
+__all__ = ["AgentCitation", "AgentResult", "AgentService"]

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from src.shared.interfaces.llm import ChatMessage, GenerationConfig, LLM, MessageRole
 from src.shared.interfaces.tool import ToolContext
 from src.tools import ToolRegistry
+
+
+@dataclass(slots=True)
+class AgentCitation:
+    source: str
+    doc_id: str
+    chunk_id: str
+    snippet: str
 
 
 @dataclass(slots=True)
@@ -13,6 +22,7 @@ class AgentResult:
     steps: int
     tools_used: list[str]
     status: str
+    citations: list[AgentCitation] = field(default_factory=list)
 
 
 class AgentService:
@@ -40,8 +50,13 @@ class AgentService:
         )
         self._system_prompt = system_prompt
 
-    async def run(self, *, question: str, session_id: str | None = None,
-                  user_id: str | None = None) -> AgentResult:
+    async def run(
+        self,
+        *,
+        question: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> AgentResult:
         messages: list[ChatMessage] = [
             ChatMessage(
                 role=MessageRole.SYSTEM,
@@ -50,6 +65,7 @@ class AgentService:
             ChatMessage(role=MessageRole.USER, content=question),
         ]
         tools_used: list[str] = []
+        latest_retrieval_payload: dict[str, Any] | None = None
 
         for step in range(1, self._max_steps + 1):
             response = await self._llm.generate(
@@ -72,6 +88,7 @@ class AgentService:
                     steps=step,
                     tools_used=tools_used,
                     status="ok",
+                    citations=self._extract_citations(latest_retrieval_payload),
                 )
 
             for tool_call in response.tool_calls:
@@ -80,6 +97,13 @@ class AgentService:
                     context=ToolContext(session_id=session_id, user_id=user_id),
                 )
                 tools_used.append(tool_call.name)
+
+                if (
+                    tool_call.name == "retrieve_context"
+                    and tool_result.success
+                    and isinstance(tool_result.output, dict)
+                ):
+                    latest_retrieval_payload = tool_result.output
 
                 payload = (
                     tool_result.output
@@ -100,4 +124,33 @@ class AgentService:
             steps=self._max_steps,
             tools_used=tools_used,
             status="max_steps_reached",
+            citations=self._extract_citations(latest_retrieval_payload),
         )
+
+    @staticmethod
+    def _extract_citations(
+        retrieval_payload: dict[str, Any] | None,
+    ) -> list[AgentCitation]:
+        if not retrieval_payload:
+            return []
+        raw_results = retrieval_payload.get("results", [])
+        if not isinstance(raw_results, list):
+            return []
+
+        citations: list[AgentCitation] = []
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            snippet = str(item.get("text", "")).strip()
+            if not snippet:
+                continue
+
+            citations.append(
+                AgentCitation(
+                    source=str(item.get("source", "unknown")),
+                    doc_id=str(item.get("doc_id", "")),
+                    chunk_id=str(item.get("chunk_id", "")),
+                    snippet=snippet[:280],
+                )
+            )
+        return citations
