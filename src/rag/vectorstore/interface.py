@@ -21,5 +21,6 @@ class VectorStore(ABC):
         *,
         query_embedding: list[float],
         top_k: int,
+        doc_id: str | None = None,
     ) -> list[RetrievedChunk]:
         """Return top-k most similar chunks."""

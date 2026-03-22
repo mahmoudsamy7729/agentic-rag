@@ -79,6 +79,7 @@ class RAGRetrievalService:
         *,
         query: str,
         top_k: int | None = None,
+        doc_id: str | None = None,
     ) -> list[RetrievedChunk]:
         final_k = top_k or self._default_top_k
         if final_k < 1:
@@ -89,6 +90,7 @@ class RAGRetrievalService:
         candidates = await self._vector_store.similarity_search(
             query_embedding=query_embedding,
             top_k=candidate_k,
+            doc_id=doc_id,
         )
         if not candidates:
             return []

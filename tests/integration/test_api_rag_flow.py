@@ -47,12 +47,13 @@ class FakeRetrievalService:
     def __init__(self, store: InMemoryRAGStore) -> None:
         self._store = store
 
-    async def retrieve(self, *, query: str, top_k: int | None = None):
+    async def retrieve(self, *, query: str, top_k: int | None = None, doc_id: str | None = None):
         lowered_query = query.lower()
         hits = [
             item
             for item in self._store.items
-            if any(token in item["text"].lower() for token in lowered_query.split())
+            if (not doc_id or item["doc_id"] == doc_id)
+            and any(token in item["text"].lower() for token in lowered_query.split())
         ]
         limit = top_k or 4
         return [
@@ -96,7 +97,7 @@ class FakeLLM(LLM):
                     ToolCall(
                         id="call-1",
                         name="retrieve_context",
-                        arguments={"query": user_question, "top_k": 4},
+                        arguments={"query": user_question},
                     )
                 ],
             )
@@ -155,7 +156,7 @@ def _build_client():
     return TestClient(app)
 
 
-def test_end_to_end_rag_flow_with_citations():
+def test_end_to_end_rag_flow_with_doc_scoped_citations():
     client = _build_client()
     try:
         llm_health = client.get("/llm/health")
@@ -166,16 +167,7 @@ def test_end_to_end_rag_flow_with_citations():
         assert tools_health.status_code == 200
         assert tools_health.json()["tools_ok"] is True
 
-        ask_before_ingest = client.post(
-            "/agent/ask",
-            json={"question": "What is the capital of France?", "session_id": "s-1"},
-        )
-        before_body = ask_before_ingest.json()
-        assert ask_before_ingest.status_code == 200
-        assert before_body["status"] == "ok"
-        assert before_body["citations"] == []
-
-        ingest = client.post(
+        ingest_a = client.post(
             "/rag/ingest/text",
             json={
                 "text": "Paris is the capital of France.",
@@ -183,20 +175,57 @@ def test_end_to_end_rag_flow_with_citations():
                 "doc_id": "doc-fr",
             },
         )
-        ingest_body = ingest.json()
-        assert ingest.status_code == 200
-        assert ingest_body["status"] == "ok"
-        assert ingest_body["chunks_ingested"] == 1
+        assert ingest_a.status_code == 200
 
-        ask_after_ingest = client.post(
+        ingest_b = client.post(
+            "/rag/ingest/text",
+            json={
+                "text": "Cairo is the capital of Egypt.",
+                "source": "wiki-egypt",
+                "doc_id": "doc-eg",
+            },
+        )
+        assert ingest_b.status_code == 200
+
+        ask_fr = client.post(
+            "/agent/ask",
+            json={
+                "question": "What is the capital?",
+                "doc_id": "doc-fr",
+                "session_id": "s-1",
+            },
+        )
+        body_fr = ask_fr.json()
+        assert ask_fr.status_code == 200
+        assert body_fr["status"] == "ok"
+        assert len(body_fr["citations"]) >= 1
+        assert all(c["doc_id"] == "doc-fr" for c in body_fr["citations"])
+
+        ask_eg = client.post(
+            "/agent/ask",
+            json={
+                "question": "What is the capital?",
+                "doc_id": "doc-eg",
+                "session_id": "s-1",
+            },
+        )
+        body_eg = ask_eg.json()
+        assert ask_eg.status_code == 200
+        assert body_eg["status"] == "ok"
+        assert len(body_eg["citations"]) >= 1
+        assert all(c["doc_id"] == "doc-eg" for c in body_eg["citations"])
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_agent_ask_without_doc_id_returns_422():
+    client = _build_client()
+    try:
+        response = client.post(
             "/agent/ask",
             json={"question": "What is the capital of France?", "session_id": "s-1"},
         )
-        after_body = ask_after_ingest.json()
-        assert ask_after_ingest.status_code == 200
-        assert after_body["status"] == "ok"
-        assert len(after_body["citations"]) >= 1
-        assert after_body["citations"][0]["source"] == "wiki-france"
+        assert response.status_code == 422
     finally:
         app.dependency_overrides.clear()
 

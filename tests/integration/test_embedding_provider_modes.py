@@ -19,7 +19,7 @@ class InMemoryVectorStore(VectorStore):
         for chunk, emb in zip(chunks, embeddings):
             self._items.append((chunk, emb))
 
-    async def similarity_search(self, *, query_embedding: list[float], top_k: int) -> list[RetrievedChunk]:
+    async def similarity_search(self, *, query_embedding: list[float], top_k: int, doc_id: str | None = None) -> list[RetrievedChunk]:
         scored: list[tuple[float, RAGChunk]] = []
         for chunk, emb in self._items:
             dot = sum(a * b for a, b in zip(query_embedding, emb))
@@ -134,3 +134,4 @@ def test_huggingface_embedding_mode_ingest_retrieve(monkeypatch):
 
     assert len(results) == 1
     assert results[0].doc_id == "doc-2"
+

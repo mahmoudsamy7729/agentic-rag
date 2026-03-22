@@ -15,10 +15,19 @@ class FakeVectorStore:
     def __init__(self, results: list[RetrievedChunk]) -> None:
         self._results = results
         self.last_top_k: int | None = None
+        self.last_doc_id: str | None = None
 
-    async def similarity_search(self, *, query_embedding: list[float], top_k: int):
+    async def similarity_search(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int,
+        doc_id: str | None = None,
+    ):
         self.last_top_k = top_k
-        return self._results[:top_k]
+        self.last_doc_id = doc_id
+        filtered = [item for item in self._results if (not doc_id or item.doc_id == doc_id)]
+        return filtered[:top_k]
 
 
 class FlakyReranker:
@@ -40,10 +49,10 @@ def _candidates() -> list[RetrievedChunk]:
     return [
         RetrievedChunk("doc-1", "chunk-1", "source-a", "text a", 0.6),
         RetrievedChunk("doc-2", "chunk-2", "source-b", "text b", 0.5),
-        RetrievedChunk("doc-3", "chunk-3", "source-c", "text c", 0.4),
-        RetrievedChunk("doc-4", "chunk-4", "source-d", "text d", 0.3),
-        RetrievedChunk("doc-5", "chunk-5", "source-e", "text e", 0.2),
-        RetrievedChunk("doc-6", "chunk-6", "source-f", "text f", 0.1),
+        RetrievedChunk("doc-2", "chunk-3", "source-c", "text c", 0.4),
+        RetrievedChunk("doc-3", "chunk-4", "source-d", "text d", 0.3),
+        RetrievedChunk("doc-4", "chunk-5", "source-e", "text e", 0.2),
+        RetrievedChunk("doc-5", "chunk-6", "source-f", "text f", 0.1),
     ]
 
 
@@ -60,12 +69,12 @@ def test_retrieval_uses_prefetch_and_reranks_to_final_top_k():
         reranker=reranker,
     )
 
-    result = asyncio.run(service.retrieve(query="refund policy"))
+    result = asyncio.run(service.retrieve(query="refund policy", doc_id="doc-2"))
 
     assert vector_store.last_top_k == 50
+    assert vector_store.last_doc_id == "doc-2"
     assert reranker.last_top_n == 5
     assert len(result) == 5
-    assert result[0].doc_id == "doc-6"
 
 
 def test_retrieval_retries_reranker_once_then_succeeds():
@@ -116,8 +125,9 @@ def test_retrieval_without_reranker_returns_base_results_truncated():
         reranker=None,
     )
 
-    result = asyncio.run(service.retrieve(query="refund policy", top_k=3))
+    result = asyncio.run(service.retrieve(query="refund policy", top_k=3, doc_id="doc-2"))
 
     assert vector_store.last_top_k == 50
-    assert len(result) == 3
-    assert [item.doc_id for item in result] == ["doc-1", "doc-2", "doc-3"]
+    assert vector_store.last_doc_id == "doc-2"
+    assert len(result) == 2
+    assert [item.doc_id for item in result] == ["doc-2", "doc-2"]

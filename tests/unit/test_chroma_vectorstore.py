@@ -41,6 +41,39 @@ def test_chroma_vectorstore_upsert_and_search():
         shutil.rmtree(persist_dir, ignore_errors=True)
 
 
+def test_chroma_vectorstore_filters_by_doc_id():
+    persist_dir = tempfile.mkdtemp(prefix="chroma-store-", dir=".")
+    try:
+        async def _run():
+            store = ChromaVectorStore(
+                persist_dir=persist_dir,
+                collection_name="unit-test-doc-filter",
+            )
+
+            chunks = [
+                RAGChunk(doc_id="doc-a", chunk_id="chunk-0", source="a.txt", text="alpha"),
+                RAGChunk(doc_id="doc-b", chunk_id="chunk-0", source="b.txt", text="alpha"),
+            ]
+            embeddings = [
+                [1.0, 0.0],
+                [1.0, 0.0],
+            ]
+
+            await store.upsert_chunks(chunks=chunks, embeddings=embeddings)
+            return await store.similarity_search(
+                query_embedding=[1.0, 0.0],
+                top_k=5,
+                doc_id="doc-b",
+            )
+
+        results = asyncio.run(_run())
+
+        assert len(results) == 1
+        assert results[0].doc_id == "doc-b"
+    finally:
+        shutil.rmtree(persist_dir, ignore_errors=True)
+
+
 def test_chroma_vectorstore_allows_distinct_collections_per_embedding_mode():
     persist_dir = tempfile.mkdtemp(prefix="chroma-store-", dir=".")
     try:
