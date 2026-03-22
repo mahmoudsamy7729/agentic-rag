@@ -8,9 +8,13 @@ from pydantic_settings import BaseSettings
 
 class RAGSettings(BaseSettings):
     rag_collection_name: str | None = Field(default=None)
-    rag_top_k: int = Field(default=4, ge=1, le=20)
+    rag_top_k: int = Field(default=5, ge=1, le=100)
+    rag_prefetch_k: int = Field(default=50, ge=1, le=200)
     rag_chunk_size: int = Field(default=800, ge=100, le=4000)
     rag_chunk_overlap: int = Field(default=120, ge=0, le=1000)
+    reranker_enabled: bool = Field(default=True)
+    reranker_model: str = Field(default="rerank-v4.0-fast")
+    reranker_api_key: str | None = Field(default=None)
     embedding_provider: Literal["openai", "huggingface"] = Field(default="huggingface")
     embedding_model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2")
     embedding_base_url: str | None = Field(default=None)

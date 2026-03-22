@@ -7,6 +7,11 @@ from src.shared.interfaces.llm import ChatMessage, GenerationConfig, LLM, Messag
 from src.shared.interfaces.tool import ToolContext
 from src.tools import ToolRegistry
 
+DEFAULT_SYSTEM_PROMPT = (
+    "You are an agentic assistant. "
+    "Use available tools when needed, then provide a final answer."
+)
+
 
 @dataclass(slots=True)
 class AgentCitation:
@@ -35,10 +40,7 @@ class AgentService:
         temperature: float = 0.0,
         max_tokens: int | None = None,
         timeout_s: float | None = 30.0,
-        system_prompt: str = (
-            "You are an agentic assistant. "
-            "Use available tools when needed, then provide a final answer."
-        ),
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     ) -> None:
         self._llm = llm
         self._registry = registry

@@ -82,6 +82,7 @@ def test_openai_embedding_mode_ingest_retrieve(monkeypatch):
         embedding_provider=provider,
         vector_store=store,
         default_top_k=2,
+        prefetch_k=50,
     )
 
     async def _run():
@@ -122,6 +123,7 @@ def test_huggingface_embedding_mode_ingest_retrieve(monkeypatch):
         embedding_provider=provider,
         vector_store=store,
         default_top_k=2,
+        prefetch_k=50,
     )
 
     async def _run():

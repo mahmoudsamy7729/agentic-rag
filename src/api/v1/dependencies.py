@@ -11,6 +11,7 @@ from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
 from src.infrastructure.llm.openai_llm import OpenAILLM
 from src.rag.embeddings import EmbeddingProvider
 from src.rag.pipeline import RAGIngestionService, RAGRetrievalService
+from src.rag.reranker import Reranker
 from src.rag.vectorstore import VectorStore
 from src.settings.config import settings
 from src.shared.interfaces.llm import LLM
@@ -74,6 +75,26 @@ VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
 
 
 @lru_cache
+def get_reranker() -> Reranker | None:
+    if not settings.reranker_enabled:
+        return None
+    if not settings.reranker_api_key:
+        raise RuntimeError("Missing RERANKER_API_KEY in environment.")
+    if not settings.reranker_model:
+        raise RuntimeError("Missing RERANKER_MODEL in environment.")
+
+    from src.infrastructure.reranker import CohereReranker
+
+    return CohereReranker(
+        api_key=settings.reranker_api_key,
+        model=settings.reranker_model,
+    )
+
+
+RerankerDep = Annotated[Reranker | None, Depends(get_reranker)]
+
+
+@lru_cache
 def get_rag_ingestion_service() -> RAGIngestionService:
     return RAGIngestionService(
         embedding_provider=get_embedding_provider(),
@@ -92,6 +113,8 @@ def get_rag_retrieval_service() -> RAGRetrievalService:
         embedding_provider=get_embedding_provider(),
         vector_store=get_vector_store(),
         default_top_k=settings.rag_top_k,
+        prefetch_k=settings.rag_prefetch_k,
+        reranker=get_reranker(),
     )
 
 
