@@ -10,6 +10,7 @@ router = APIRouter()
 async def agent_ask(payload: AgentAskRequest, agent_service: AgentServiceDep):
     result = await agent_service.run(
         question=payload.question,
+        doc_id=payload.doc_id,
         session_id=payload.session_id,
         user_id=payload.user_id,
     )

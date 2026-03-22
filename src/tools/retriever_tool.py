@@ -42,11 +42,15 @@ class RetrieverTool(Tool):
         query = str(arguments.get("query", "")).strip()
         if not query:
             return ToolExecutionResult(success=False, error="Missing required argument: query")
+        doc_id = (context.doc_id if context else None) or ""
+        if not doc_id:
+            return ToolExecutionResult(success=False, error="Missing required context: doc_id")
 
         try:
             chunks = await self._retrieval_service.retrieve(
                 query=query,
                 top_k=self._default_top_k,
+                doc_id=doc_id,
             )
         except Exception as exc:
             return ToolExecutionResult(
@@ -67,6 +71,7 @@ class RetrieverTool(Tool):
                     }
                     for chunk in chunks
                 ],
+                "doc_id": doc_id,
                 "session_id": context.session_id if context else None,
                 "user_id": context.user_id if context else None,
             },

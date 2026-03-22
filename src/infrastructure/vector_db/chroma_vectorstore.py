@@ -49,11 +49,14 @@ class ChromaVectorStore(VectorStore):
         *,
         query_embedding: list[float],
         top_k: int,
+        doc_id: str | None = None,
     ) -> list[RetrievedChunk]:
+        where = {"doc_id": doc_id} if doc_id else None
         response = self._collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
             include=["documents", "metadatas", "distances"],
+            where=where,
         )
 
         documents = response.get("documents", [[]])[0]

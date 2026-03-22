@@ -9,6 +9,7 @@ from typing import Any
 class ToolContext:
     user_id: str | None = None
     session_id: str | None = None
+    doc_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
