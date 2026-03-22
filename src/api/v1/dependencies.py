@@ -66,7 +66,7 @@ def get_vector_store() -> VectorStore:
 
     return ChromaVectorStore(
         persist_dir=settings.chroma_persist_dir,
-        collection_name=settings.rag_collection_name,
+        collection_name=settings.resolved_rag_collection_name(),
     )
 
 
