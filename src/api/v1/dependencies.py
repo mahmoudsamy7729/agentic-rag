@@ -6,9 +6,9 @@ from typing import Annotated
 from fastapi import Depends
 
 from src.agents import AgentService
+from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingProvider
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
 from src.infrastructure.llm.openai_llm import OpenAILLM
-from src.infrastructure.vector_db.chroma_vectorstore import ChromaVectorStore
 from src.rag.embeddings import EmbeddingProvider
 from src.rag.pipeline import RAGIngestionService, RAGRetrievalService
 from src.rag.vectorstore import VectorStore
@@ -36,15 +36,24 @@ LLMDep = Annotated[LLM, Depends(get_llm)]
 
 @lru_cache
 def get_embedding_provider() -> EmbeddingProvider:
-    if not settings.openai_key:
-        raise RuntimeError("Missing OPENAI_KEY in environment.")
     if not settings.embedding_model:
         raise RuntimeError("Missing EMBEDDING_MODEL in environment.")
+    provider_name = settings.embedding_provider
 
-    return OpenAIEmbeddingProvider(
-        api_key=settings.openai_key,
-        model=settings.embedding_model,
-        base_url=settings.embedding_base_url,
+    if provider_name == "openai":
+        if not settings.openai_key:
+            raise RuntimeError("Missing OPENAI_KEY in environment.")
+        return OpenAIEmbeddingProvider(
+            api_key=settings.openai_key,
+            model=settings.embedding_model,
+            base_url=settings.embedding_base_url,
+        )
+
+    if provider_name == "huggingface":
+        return HuggingFaceEmbeddingProvider(model_name=settings.embedding_model)
+
+    raise RuntimeError(
+        f"Unsupported EMBEDDING_PROVIDER '{provider_name}'. Use 'openai' or 'huggingface'."
     )
 
 
@@ -53,6 +62,8 @@ EmbeddingProviderDep = Annotated[EmbeddingProvider, Depends(get_embedding_provid
 
 @lru_cache
 def get_vector_store() -> VectorStore:
+    from src.infrastructure.vector_db.chroma_vectorstore import ChromaVectorStore
+
     return ChromaVectorStore(
         persist_dir=settings.chroma_persist_dir,
         collection_name=settings.rag_collection_name,
