@@ -28,12 +28,6 @@ class RetrieverTool(Tool):
                     "type": "string",
                     "description": "The search query to retrieve relevant document chunks.",
                 },
-                "top_k": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 20,
-                    "description": "Maximum number of chunks to retrieve.",
-                },
             },
             "required": ["query"],
             "additionalProperties": False,
@@ -49,16 +43,16 @@ class RetrieverTool(Tool):
         if not query:
             return ToolExecutionResult(success=False, error="Missing required argument: query")
 
-        top_k_value = arguments.get("top_k", self._default_top_k)
         try:
-            top_k = int(top_k_value)
-        except (TypeError, ValueError):
-            return ToolExecutionResult(success=False, error="top_k must be an integer")
-
-        if top_k < 1:
-            return ToolExecutionResult(success=False, error="top_k must be >= 1")
-
-        chunks = await self._retrieval_service.retrieve(query=query, top_k=top_k)
+            chunks = await self._retrieval_service.retrieve(
+                query=query,
+                top_k=self._default_top_k,
+            )
+        except Exception as exc:
+            return ToolExecutionResult(
+                success=False,
+                error=f"Retrieval failed: {exc}",
+            )
         return ToolExecutionResult(
             success=True,
             output={

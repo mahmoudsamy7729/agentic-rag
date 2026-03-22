@@ -6,6 +6,7 @@ from uuid import uuid4
 from src.rag.embeddings.interface import EmbeddingProvider
 from src.rag.ingestion.chunker import chunk_text
 from src.rag.models import RetrievedChunk
+from src.rag.reranker import Reranker
 from src.rag.vectorstore.interface import VectorStore
 
 
@@ -64,10 +65,14 @@ class RAGRetrievalService:
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,
         default_top_k: int,
+        prefetch_k: int,
+        reranker: Reranker | None = None,
     ) -> None:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
         self._default_top_k = default_top_k
+        self._prefetch_k = prefetch_k
+        self._reranker = reranker
 
     async def retrieve(
         self,
@@ -75,8 +80,32 @@ class RAGRetrievalService:
         query: str,
         top_k: int | None = None,
     ) -> list[RetrievedChunk]:
+        final_k = top_k or self._default_top_k
+        if final_k < 1:
+            raise ValueError("top_k must be >= 1")
+
+        candidate_k = max(self._prefetch_k, final_k)
         query_embedding = await self._embedding_provider.embed_query(query)
-        return await self._vector_store.similarity_search(
+        candidates = await self._vector_store.similarity_search(
             query_embedding=query_embedding,
-            top_k=top_k or self._default_top_k,
+            top_k=candidate_k,
         )
+        if not candidates:
+            return []
+        if self._reranker is None:
+            return candidates[:final_k]
+
+        attempts = 2
+        for attempt in range(1, attempts + 1):
+            try:
+                reranked = await self._reranker.rerank(
+                    query=query,
+                    chunks=candidates,
+                    top_n=final_k,
+                )
+                return reranked[:final_k]
+            except Exception as exc:
+                if attempt >= attempts:
+                    raise RuntimeError("Reranker failed after one retry.") from exc
+
+        return candidates[:final_k]
