@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -6,7 +7,7 @@ from pydantic_settings import BaseSettings
 
 
 class RAGSettings(BaseSettings):
-    rag_collection_name: str = Field(default="agentic_rag_docs")
+    rag_collection_name: str | None = Field(default=None)
     rag_top_k: int = Field(default=4, ge=1, le=20)
     rag_chunk_size: int = Field(default=800, ge=100, le=4000)
     rag_chunk_overlap: int = Field(default=120, ge=0, le=1000)
@@ -16,3 +17,18 @@ class RAGSettings(BaseSettings):
     chroma_persist_dir: str = Field(
         default_factory=lambda: str(Path(__file__).resolve().parents[2] / "data" / "chroma")
     )
+
+    def resolved_rag_collection_name(self) -> str:
+        if self.rag_collection_name is not None:
+            return self.rag_collection_name
+        if not self.embedding_model:
+            raise RuntimeError("Missing EMBEDDING_MODEL in environment.")
+
+        # Separate persisted collections by embedding config to avoid cross-model
+        # dimension collisions when deployments switch providers or models.
+        model_slug = re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", self.embedding_model.lower()))
+        model_slug = model_slug.strip("_")
+        if not model_slug:
+            raise RuntimeError("Could not derive RAG collection name from EMBEDDING_MODEL.")
+
+        return f"agentic_rag_docs__{self.embedding_provider}__{model_slug}"
