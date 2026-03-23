@@ -19,4 +19,8 @@ dependencies = [
     "rapidfuzz>=3.14.3",
     "sentence-transformers>=5.3.0",
     "uvicorn[standard]>=0.42.0",
+    "asyncpg>=0.31.0",
+    "alembic>=1.18.4",
+    "fastapi-users[sqlalchemy]>=15.0.4",
+    "python-jose>=3.5.0",
 ]
