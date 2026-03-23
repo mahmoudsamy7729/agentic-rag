@@ -68,6 +68,7 @@ class RetrieverTool(Tool):
                         "source": chunk.source,
                         "text": chunk.text,
                         "score": chunk.score,
+                        "page_number": chunk.page_number,
                     }
                     for chunk in chunks
                 ],

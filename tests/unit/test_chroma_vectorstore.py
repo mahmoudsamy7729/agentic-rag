@@ -20,7 +20,13 @@ def test_chroma_vectorstore_upsert_and_search():
             )
 
             chunks = [
-                RAGChunk(doc_id="doc-1", chunk_id="chunk-0", source="a.txt", text="alpha"),
+                RAGChunk(
+                    doc_id="doc-1",
+                    chunk_id="chunk-0",
+                    source="a.txt",
+                    text="alpha",
+                    page_number=2,
+                ),
                 RAGChunk(doc_id="doc-1", chunk_id="chunk-1", source="a.txt", text="beta"),
             ]
             embeddings = [
@@ -37,6 +43,7 @@ def test_chroma_vectorstore_upsert_and_search():
         assert results[0].chunk_id == "chunk-0"
         assert results[0].doc_id == "doc-1"
         assert results[0].source == "a.txt"
+        assert results[0].page_number == 2
     finally:
         shutil.rmtree(persist_dir, ignore_errors=True)
 

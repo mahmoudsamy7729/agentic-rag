@@ -29,11 +29,7 @@ class ChromaVectorStore(VectorStore):
         ids = [f"{chunk.doc_id}:{chunk.chunk_id}" for chunk in chunks]
         documents = [chunk.text for chunk in chunks]
         metadatas = [
-            {
-                "doc_id": chunk.doc_id,
-                "chunk_id": chunk.chunk_id,
-                "source": chunk.source,
-            }
+            self._build_metadata(chunk)
             for chunk in chunks
         ]
 
@@ -73,6 +69,28 @@ class ChromaVectorStore(VectorStore):
                     source=str((metadata or {}).get("source", "unknown")),
                     text=str(document),
                     score=score,
+                    page_number=self._parse_page_number(metadata or {}),
                 )
             )
         return results
+
+    @staticmethod
+    def _build_metadata(chunk: RAGChunk) -> dict[str, str | int]:
+        metadata: dict[str, str | int] = {
+            "doc_id": chunk.doc_id,
+            "chunk_id": chunk.chunk_id,
+            "source": chunk.source,
+        }
+        if chunk.page_number is not None:
+            metadata["page_number"] = int(chunk.page_number)
+        return metadata
+
+    @staticmethod
+    def _parse_page_number(metadata: dict[str, str | int]) -> int | None:
+        raw = metadata.get("page_number")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None

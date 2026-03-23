@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from src.rag.embeddings.interface import EmbeddingProvider
 from src.rag.ingestion.chunker import chunk_text
+from src.rag.ingestion.pdf_extractor import PDFExtractor
 from src.rag.models import RetrievedChunk
 from src.rag.reranker import Reranker
 from src.rag.vectorstore.interface import VectorStore
@@ -16,6 +17,16 @@ class IngestionResult:
     chunks_ingested: int
 
 
+@dataclass(slots=True)
+class PDFIngestionResult:
+    doc_id: str
+    chunks_ingested: int
+    pages_total: int
+    pages_ingested: int
+    skipped_pages: list[int]
+    warnings: list[str]
+
+
 class RAGIngestionService:
     def __init__(
         self,
@@ -24,11 +35,15 @@ class RAGIngestionService:
         vector_store: VectorStore,
         chunk_size: int,
         chunk_overlap: int,
+        pdf_extractor: PDFExtractor | None = None,
+        pdf_max_pages: int = 300,
     ) -> None:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
+        self._pdf_extractor = pdf_extractor
+        self._pdf_max_pages = pdf_max_pages
 
     async def ingest_text(
         self,
@@ -55,6 +70,59 @@ class RAGIngestionService:
         return IngestionResult(
             doc_id=resolved_doc_id,
             chunks_ingested=len(chunks),
+        )
+
+    async def ingest_pdf(
+        self,
+        *,
+        pdf_bytes: bytes,
+        source: str | None = None,
+        doc_id: str | None = None,
+    ) -> PDFIngestionResult:
+        if self._pdf_extractor is None:
+            raise RuntimeError("PDF extractor is not configured.")
+
+        resolved_doc_id = doc_id or str(uuid4())
+        resolved_source = source or "uploaded-pdf"
+        extraction = await self._pdf_extractor.extract(
+            pdf_bytes=pdf_bytes,
+            max_pages=self._pdf_max_pages,
+        )
+
+        if extraction.pages_ingested == 0:
+            raise ValueError("No extractable pages were found in this PDF.")
+
+        chunks = []
+        global_index = 0
+        for segment in extraction.segments:
+            segment_chunks = chunk_text(
+                text=segment.text,
+                doc_id=resolved_doc_id,
+                source=resolved_source,
+                chunk_size=self._chunk_size,
+                chunk_overlap=self._chunk_overlap,
+                page_number=segment.page_number,
+            )
+            for chunk in segment_chunks:
+                chunk.chunk_id = f"chunk-{global_index}"
+                global_index += 1
+                chunks.append(chunk)
+
+        if not chunks:
+            raise ValueError("No chunks were generated from extracted PDF content.")
+
+        embeddings = await self._embedding_provider.embed_documents(
+            [chunk.text for chunk in chunks]
+        )
+        await self._vector_store.upsert_chunks(chunks=chunks, embeddings=embeddings)
+
+        return PDFIngestionResult(
+            doc_id=resolved_doc_id,
+            chunks_ingested=len(chunks),
+            pages_total=extraction.pages_total,
+            pages_ingested=extraction.pages_ingested,
+            skipped_pages=extraction.skipped_pages,
+            warnings=extraction.warnings,
         )
 
 

@@ -25,6 +25,7 @@ async def agent_ask(payload: AgentAskRequest, agent_service: AgentServiceDep):
                 "doc_id": citation.doc_id,
                 "chunk_id": citation.chunk_id,
                 "snippet": citation.snippet,
+                "page_number": citation.page_number,
             }
             for citation in result.citations
         ],

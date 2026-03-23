@@ -19,6 +19,7 @@ class AgentCitation:
     doc_id: str
     chunk_id: str
     snippet: str
+    page_number: int | None = None
 
 
 @dataclass(slots=True)
@@ -154,6 +155,16 @@ class AgentService:
                     doc_id=str(item.get("doc_id", "")),
                     chunk_id=str(item.get("chunk_id", "")),
                     snippet=snippet[:280],
+                    page_number=AgentService._to_int(item.get("page_number")),
                 )
             )
         return citations
+
+    @staticmethod
+    def _to_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
