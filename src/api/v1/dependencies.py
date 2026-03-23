@@ -4,8 +4,10 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents import AgentService
+from src.infrastructure.database import get_db
 from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingProvider
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
 from src.infrastructure.llm.openai_llm import OpenAILLM
@@ -17,6 +19,8 @@ from src.rag.vectorstore import VectorStore
 from src.settings.config import settings
 from src.shared.interfaces.llm import LLM
 from src.tools import PingTool, RetrieverTool, ToolRegistry
+
+DbSessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 @lru_cache
