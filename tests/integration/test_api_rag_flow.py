@@ -9,7 +9,7 @@ from main import app
 from src.agents import AgentService
 from src.api.v1 import dependencies as deps
 from src.rag.models import RetrievedChunk
-from src.rag.pipeline import IngestionResult
+from src.rag.pipeline import IngestionResult, PDFIngestionResult
 from src.shared.interfaces.llm import (
     ChatMessage,
     GenerationConfig,
@@ -38,9 +38,32 @@ class FakeIngestionService:
                 "chunk_id": "chunk-0",
                 "source": source or "inline-text",
                 "text": text,
+                "page_number": None,
             }
         )
         return IngestionResult(doc_id=resolved_doc_id, chunks_ingested=1)
+
+    async def ingest_pdf(self, *, pdf_bytes: bytes, source: str | None = None, doc_id: str | None = None):
+        if not pdf_bytes:
+            raise ValueError("Uploaded PDF is empty.")
+        resolved_doc_id = doc_id or f"doc-{len(self._store.items) + 1}"
+        self._store.items.append(
+            {
+                "doc_id": resolved_doc_id,
+                "chunk_id": "chunk-0",
+                "source": source or "uploaded-pdf",
+                "text": "Refund rules for digital products are 7 days.",
+                "page_number": 1,
+            }
+        )
+        return PDFIngestionResult(
+            doc_id=resolved_doc_id,
+            chunks_ingested=1,
+            pages_total=2,
+            pages_ingested=1,
+            skipped_pages=[2],
+            warnings=["Page 2: no extractable text or tables."],
+        )
 
 
 class FakeRetrievalService:
@@ -63,6 +86,7 @@ class FakeRetrievalService:
                 source=item["source"],
                 text=item["text"],
                 score=0.9,
+                page_number=item.get("page_number"),
             )
             for item in hits[:limit]
         ]
@@ -214,6 +238,44 @@ def test_end_to_end_rag_flow_with_doc_scoped_citations():
         assert body_eg["status"] == "ok"
         assert len(body_eg["citations"]) >= 1
         assert all(c["doc_id"] == "doc-eg" for c in body_eg["citations"])
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ingest_pdf_and_page_number_citations():
+    client = _build_client()
+    try:
+        ingest = client.post(
+            "/rag/ingest/pdf",
+            files={"file": ("policy.pdf", b"%PDF-sample", "application/pdf")},
+            data={"source": "policy-pdf", "doc_id": "doc-pdf"},
+        )
+        body = ingest.json()
+
+        assert ingest.status_code == 200
+        assert body["status"] == "ok"
+        assert body["doc_id"] == "doc-pdf"
+        assert body["pages_total"] == 2
+        assert body["pages_ingested"] == 1
+        assert body["skipped_pages"] == [2]
+        assert len(body["warnings"]) == 1
+
+        ask = client.post(
+            "/agent/ask",
+            json={
+                "question": "refund rules",
+                "doc_id": "doc-pdf",
+                "session_id": "s-1",
+            },
+        )
+        ask_body = ask.json()
+
+        assert ask.status_code == 200
+        assert ask_body["status"] == "ok"
+        assert len(ask_body["citations"]) >= 1
+        assert ask_body["citations"][0]["doc_id"] == "doc-pdf"
+        assert ask_body["citations"][0]["source"] == "policy-pdf"
+        assert ask_body["citations"][0]["page_number"] == 1
     finally:
         app.dependency_overrides.clear()
 

@@ -26,6 +26,7 @@ class FakeRetrievalService:
                 source="policy.md",
                 text=f"Found context for: {query}",
                 score=0.91,
+                page_number=3,
             )
         ]
 
@@ -48,6 +49,7 @@ def test_retriever_tool_returns_structured_results():
     assert len(result.output["results"]) == 1
     assert result.output["results"][0]["doc_id"] == "doc-1"
     assert result.output["results"][0]["source"] == "policy.md"
+    assert result.output["results"][0]["page_number"] == 3
     assert retrieval_service.last_top_k == 4
     assert retrieval_service.last_doc_id == "doc-1"
 

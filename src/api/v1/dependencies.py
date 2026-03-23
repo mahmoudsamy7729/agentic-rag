@@ -10,6 +10,7 @@ from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingPr
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
 from src.infrastructure.llm.openai_llm import OpenAILLM
 from src.rag.embeddings import EmbeddingProvider
+from src.rag.ingestion import PDFExtractor, PDFPlumberExtractor
 from src.rag.pipeline import RAGIngestionService, RAGRetrievalService
 from src.rag.reranker import Reranker
 from src.rag.vectorstore import VectorStore
@@ -95,12 +96,24 @@ RerankerDep = Annotated[Reranker | None, Depends(get_reranker)]
 
 
 @lru_cache
+def get_pdf_extractor() -> PDFExtractor:
+    return PDFPlumberExtractor(
+        dedupe_threshold=settings.rag_pdf_dedupe_threshold,
+    )
+
+
+PDFExtractorDep = Annotated[PDFExtractor, Depends(get_pdf_extractor)]
+
+
+@lru_cache
 def get_rag_ingestion_service() -> RAGIngestionService:
     return RAGIngestionService(
         embedding_provider=get_embedding_provider(),
         vector_store=get_vector_store(),
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
+        pdf_extractor=get_pdf_extractor(),
+        pdf_max_pages=settings.rag_pdf_max_pages,
     )
 
 

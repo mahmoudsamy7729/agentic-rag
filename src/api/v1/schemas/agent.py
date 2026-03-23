@@ -6,6 +6,10 @@ class AgentCitation(BaseModel):
     doc_id: str = Field(description="Indexed document id.")
     chunk_id: str = Field(description="Indexed chunk id.")
     snippet: str = Field(description="Retrieved text snippet.")
+    page_number: int | None = Field(
+        default=None,
+        description="Optional page number when citation comes from PDF ingestion.",
+    )
 
 
 class AgentAskRequest(BaseModel):

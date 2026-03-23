@@ -10,6 +10,7 @@ def chunk_text(
     source: str,
     chunk_size: int,
     chunk_overlap: int,
+    page_number: int | None = None,
 ) -> list[RAGChunk]:
     normalized = text.strip()
     if not normalized:
@@ -32,6 +33,7 @@ def chunk_text(
                     chunk_id=f"chunk-{index}",
                     source=source,
                     text=chunk_body,
+                    page_number=page_number,
                 )
             )
             index += 1
