@@ -64,6 +64,7 @@ class CohereReranker(Reranker):
                     "chunk_id": chunk.chunk_id,
                     "source": chunk.source,
                     "score": chunk.score,
+                    "page_number": chunk.page_number,
                     "_candidate_index": index,
                 },
             )
@@ -86,10 +87,12 @@ class CohereReranker(Reranker):
                 doc_id = original.doc_id
                 chunk_id = original.chunk_id
                 source = original.source
+                page_number = original.page_number
             else:
                 doc_id = str(metadata.get("doc_id", ""))
                 chunk_id = str(metadata.get("chunk_id", ""))
                 source = str(metadata.get("source", "unknown"))
+                page_number = self._parse_page_number(metadata.get("page_number"))
 
             score = metadata.get("relevance_score", metadata.get("score", 0.0))
             reranked_chunks.append(
@@ -99,6 +102,7 @@ class CohereReranker(Reranker):
                     source=source,
                     text=str(doc.page_content),
                     score=float(score),
+                    page_number=page_number,
                 )
             )
 
@@ -110,3 +114,11 @@ class CohereReranker(Reranker):
             return {}
         return metadata
 
+    @staticmethod
+    def _parse_page_number(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None

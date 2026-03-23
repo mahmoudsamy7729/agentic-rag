@@ -20,6 +20,7 @@ def _sample_chunks() -> list[RetrievedChunk]:
             source="policy.md",
             text="Refunds for digital products are limited.",
             score=0.30,
+            page_number=4,
         ),
         RetrievedChunk(
             doc_id="doc-2",
@@ -27,6 +28,7 @@ def _sample_chunks() -> list[RetrievedChunk]:
             source="terms.md",
             text="Users can request refunds within 7 days.",
             score=0.20,
+            page_number=9,
         ),
         RetrievedChunk(
             doc_id="doc-3",
@@ -34,6 +36,7 @@ def _sample_chunks() -> list[RetrievedChunk]:
             source="faq.md",
             text="Support can approve exceptions.",
             score=0.10,
+            page_number=12,
         ),
     ]
 
@@ -72,8 +75,10 @@ def test_cohere_reranker_returns_ranked_chunks(monkeypatch):
     assert len(result) == 2
     assert result[0].doc_id == "doc-2"
     assert result[0].score == pytest.approx(0.98)
+    assert result[0].page_number == 9
     assert result[1].doc_id == "doc-1"
     assert result[1].score == pytest.approx(0.87)
+    assert result[1].page_number == 4
 
 
 def test_cohere_reranker_raises_on_malformed_payload(monkeypatch):
