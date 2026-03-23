@@ -1,28 +1,63 @@
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError
 
-from src.api.v1.dependencies import RAGIngestionServiceDep
+from src.api.v1.dependencies import RAGIngestionServiceDep, VectorStoreDep
 from src.api.v1.schemas import (
     RAGIngestPDFResponse,
     RAGIngestTextRequest,
     RAGIngestTextResponse,
 )
+from src.modules.documents import DocumentsRepositoryDep
+from src.modules.users.dependencies import ActiveUserDep
 from src.settings.config import settings
 
 router = APIRouter()
 
 
 @router.post("/rag/ingest/text", response_model=RAGIngestTextResponse)
-async def ingest_text(payload: RAGIngestTextRequest, ingestion_service: RAGIngestionServiceDep):
-    result = await ingestion_service.ingest_text(
-        text=payload.text,
-        source=payload.source,
-        doc_id=payload.doc_id,
-    )
+async def ingest_text(
+    payload: RAGIngestTextRequest,
+    ingestion_service: RAGIngestionServiceDep,
+    repository: DocumentsRepositoryDep,
+    vector_store: VectorStoreDep,
+    current_user: ActiveUserDep,
+):
+    resolved_doc_id = payload.doc_id or str(uuid4())
+    if await repository.doc_id_exists(doc_id=resolved_doc_id, include_deleted=True):
+        raise HTTPException(status_code=409, detail="Document id already exists.")
+
+    try:
+        await repository.create_document(
+            owner_user_id=current_user.id,
+            doc_id=resolved_doc_id,
+            source=payload.source or "inline-text",
+        )
+    except IntegrityError as exc:
+        await repository.rollback()
+        raise HTTPException(status_code=409, detail="Document id already exists.") from exc
+
+    try:
+        result = await ingestion_service.ingest_text(
+            text=payload.text,
+            source=payload.source,
+            doc_id=resolved_doc_id,
+        )
+        await repository.commit()
+    except ValueError as exc:
+        await repository.rollback()
+        await vector_store.delete_by_doc_id(doc_id=resolved_doc_id)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        await repository.rollback()
+        await vector_store.delete_by_doc_id(doc_id=resolved_doc_id)
+        raise HTTPException(status_code=500, detail="Ingestion failed.") from exc
+
     return RAGIngestTextResponse(
         status="ok",
-        doc_id=result.doc_id,
+        doc_id=resolved_doc_id,
         chunks_ingested=result.chunks_ingested,
     )
 
@@ -31,6 +66,9 @@ async def ingest_text(payload: RAGIngestTextRequest, ingestion_service: RAGInges
 async def ingest_pdf(
     file: Annotated[UploadFile, File(...)],
     ingestion_service: RAGIngestionServiceDep,
+    repository: DocumentsRepositoryDep,
+    vector_store: VectorStoreDep,
+    current_user: ActiveUserDep,
     source: Annotated[str | None, Form()] = None,
     doc_id: Annotated[str | None, Form()] = None,
 ):
@@ -46,18 +84,38 @@ async def ingest_pdf(
         )
 
     resolved_source = source or file.filename or "uploaded-pdf"
+    resolved_doc_id = doc_id or str(uuid4())
+    if await repository.doc_id_exists(doc_id=resolved_doc_id, include_deleted=True):
+        raise HTTPException(status_code=409, detail="Document id already exists.")
+    try:
+        await repository.create_document(
+            owner_user_id=current_user.id,
+            doc_id=resolved_doc_id,
+            source=resolved_source,
+        )
+    except IntegrityError as exc:
+        await repository.rollback()
+        raise HTTPException(status_code=409, detail="Document id already exists.") from exc
+
     try:
         result = await ingestion_service.ingest_pdf(
             pdf_bytes=payload,
             source=resolved_source,
-            doc_id=doc_id,
+            doc_id=resolved_doc_id,
         )
+        await repository.commit()
     except ValueError as exc:
+        await repository.rollback()
+        await vector_store.delete_by_doc_id(doc_id=resolved_doc_id)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        await repository.rollback()
+        await vector_store.delete_by_doc_id(doc_id=resolved_doc_id)
+        raise HTTPException(status_code=500, detail="Ingestion failed.") from exc
 
     return RAGIngestPDFResponse(
         status="ok",
-        doc_id=result.doc_id,
+        doc_id=resolved_doc_id,
         chunks_ingested=result.chunks_ingested,
         pages_total=result.pages_total,
         pages_ingested=result.pages_ingested,

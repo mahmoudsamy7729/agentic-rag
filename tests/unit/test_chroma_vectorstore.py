@@ -122,3 +122,26 @@ def test_chroma_vectorstore_allows_distinct_collections_per_embedding_mode():
         assert huggingface_results[0].doc_id == "doc-hf"
     finally:
         shutil.rmtree(persist_dir, ignore_errors=True)
+
+
+def test_chroma_vectorstore_delete_by_doc_id():
+    persist_dir = tempfile.mkdtemp(prefix="chroma-store-", dir=".")
+    try:
+        async def _run():
+            store = ChromaVectorStore(
+                persist_dir=persist_dir,
+                collection_name="unit-test-delete-doc",
+            )
+            chunks = [
+                RAGChunk(doc_id="doc-a", chunk_id="chunk-0", source="a.txt", text="alpha"),
+                RAGChunk(doc_id="doc-b", chunk_id="chunk-0", source="b.txt", text="beta"),
+            ]
+            embeddings = [[1.0, 0.0], [0.0, 1.0]]
+            await store.upsert_chunks(chunks=chunks, embeddings=embeddings)
+            await store.delete_by_doc_id(doc_id="doc-a")
+            return await store.similarity_search(query_embedding=[1.0, 0.0], top_k=10)
+
+        results = asyncio.run(_run())
+        assert all(item.doc_id != "doc-a" for item in results)
+    finally:
+        shutil.rmtree(persist_dir, ignore_errors=True)

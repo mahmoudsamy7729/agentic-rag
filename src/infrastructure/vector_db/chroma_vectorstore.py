@@ -74,6 +74,11 @@ class ChromaVectorStore(VectorStore):
             )
         return results
 
+    async def delete_by_doc_id(self, *, doc_id: str) -> None:
+        if not doc_id:
+            return
+        self._collection.delete(where={"doc_id": doc_id})
+
     @staticmethod
     def _build_metadata(chunk: RAGChunk) -> dict[str, str | int]:
         metadata: dict[str, str | int] = {

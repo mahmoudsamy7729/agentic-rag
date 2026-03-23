@@ -1,4 +1,7 @@
 import ast
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +11,8 @@ pytest.importorskip("chromadb")
 from main import app
 from src.agents import AgentService
 from src.api.v1 import dependencies as deps
+from src.modules.documents.dependencies import get_documents_repository
+from src.modules.users.dependencies import active_user
 from src.rag.models import RetrievedChunk
 from src.rag.pipeline import IngestionResult, PDFIngestionResult
 from src.shared.interfaces.llm import (
@@ -24,6 +29,11 @@ from src.tools import PingTool, RetrieverTool, ToolRegistry
 class InMemoryRAGStore:
     def __init__(self) -> None:
         self.items: list[dict] = []
+
+
+class FakeVectorStore:
+    async def delete_by_doc_id(self, *, doc_id: str) -> None:
+        return None
 
 
 class FakeIngestionService:
@@ -156,10 +166,93 @@ class FakeLLM(LLM):
             yield ""
 
 
+@dataclass
+class FakeUser:
+    id: UUID
+    is_active: bool = True
+
+
+@dataclass
+class FakeDocument:
+    id: str
+    owner_user_id: UUID
+    source: str | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class FakeDocumentsRepository:
+    def __init__(self) -> None:
+        self._items: dict[str, FakeDocument] = {}
+
+    async def create_document(self, *, owner_user_id: UUID, doc_id: str, source: str | None):
+        now = datetime.now(timezone.utc)
+        doc = FakeDocument(
+            id=doc_id,
+            owner_user_id=owner_user_id,
+            source=source,
+            created_at=now,
+            updated_at=now,
+            deleted_at=None,
+        )
+        self._items[doc_id] = doc
+        return doc
+
+    async def get_owned_document(self, *, owner_user_id: UUID, doc_id: str, include_deleted: bool = False):
+        item = self._items.get(doc_id)
+        if item is None:
+            return None
+        if item.owner_user_id != owner_user_id:
+            return None
+        if not include_deleted and item.deleted_at is not None:
+            return None
+        return item
+
+    async def list_owned_documents(self, *, owner_user_id: UUID, limit: int, offset: int):
+        items = [
+            item
+            for item in self._items.values()
+            if item.owner_user_id == owner_user_id and item.deleted_at is None
+        ]
+        items.sort(key=lambda item: item.created_at, reverse=True)
+        return items[offset : offset + limit]
+
+    async def soft_delete_owned_document(self, *, owner_user_id: UUID, doc_id: str):
+        item = await self.get_owned_document(
+            owner_user_id=owner_user_id,
+            doc_id=doc_id,
+            include_deleted=True,
+        )
+        if item is None:
+            return None
+        if item.deleted_at is None:
+            now = datetime.now(timezone.utc)
+            item.deleted_at = now
+            item.updated_at = now
+        return item
+
+    async def doc_id_exists(self, *, doc_id: str, include_deleted: bool = True) -> bool:
+        item = self._items.get(doc_id)
+        if item is None:
+            return False
+        if include_deleted:
+            return True
+        return item.deleted_at is None
+
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None
+
+
 def _build_client():
     store = InMemoryRAGStore()
     ingestion_service = FakeIngestionService(store)
     retrieval_service = FakeRetrievalService(store)
+    docs_repo = FakeDocumentsRepository()
+    owner = FakeUser(id=uuid4())
     registry = ToolRegistry(
         [
             PingTool(),
@@ -171,6 +264,9 @@ def _build_client():
     app.dependency_overrides[deps.get_rag_ingestion_service] = lambda: ingestion_service
     app.dependency_overrides[deps.get_tool_registry] = lambda: registry
     app.dependency_overrides[deps.get_llm] = lambda: llm
+    app.dependency_overrides[deps.get_vector_store] = lambda: FakeVectorStore()
+    app.dependency_overrides[get_documents_repository] = lambda: docs_repo
+    app.dependency_overrides[active_user] = lambda: owner
     app.dependency_overrides[deps.get_agent_service] = lambda: AgentService(
         llm=llm,
         registry=registry,
@@ -276,6 +372,59 @@ def test_ingest_pdf_and_page_number_citations():
         assert ask_body["citations"][0]["doc_id"] == "doc-pdf"
         assert ask_body["citations"][0]["source"] == "policy-pdf"
         assert ask_body["citations"][0]["page_number"] == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_documents_routes_soft_delete_and_agent_ownership_enforcement():
+    client = _build_client()
+    try:
+        ingest = client.post(
+            "/rag/ingest/text",
+            json={"text": "hello", "source": "s", "doc_id": "doc-owned"},
+        )
+        assert ingest.status_code == 200
+
+        listing = client.get("/documents")
+        assert listing.status_code == 200
+        assert len(listing.json()["items"]) == 1
+
+        get_doc = client.get("/documents/doc-owned")
+        assert get_doc.status_code == 200
+
+        deleted = client.delete("/documents/doc-owned")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+
+        get_after = client.get("/documents/doc-owned")
+        assert get_after.status_code == 404
+
+        ask_after = client.post(
+            "/agent/ask",
+            json={"question": "hello?", "doc_id": "doc-owned", "session_id": "s-1"},
+        )
+        assert ask_after.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ingest_duplicate_doc_id_returns_409_even_if_soft_deleted():
+    client = _build_client()
+    try:
+        first = client.post(
+            "/rag/ingest/text",
+            json={"text": "v1", "source": "s", "doc_id": "doc-fixed"},
+        )
+        assert first.status_code == 200
+
+        deleted = client.delete("/documents/doc-fixed")
+        assert deleted.status_code == 200
+
+        second = client.post(
+            "/rag/ingest/text",
+            json={"text": "v2", "source": "s", "doc_id": "doc-fixed"},
+        )
+        assert second.status_code == 409
     finally:
         app.dependency_overrides.clear()
 

@@ -37,6 +37,9 @@ class InMemoryVectorStore(VectorStore):
             for score, chunk in scored[:top_k]
         ]
 
+    async def delete_by_doc_id(self, *, doc_id: str) -> None:
+        self._items = [item for item in self._items if item[0].doc_id != doc_id]
+
 
 @pytest.fixture(autouse=True)
 def _restore_settings_and_cache():
@@ -134,4 +137,3 @@ def test_huggingface_embedding_mode_ingest_retrieve(monkeypatch):
 
     assert len(results) == 1
     assert results[0].doc_id == "doc-2"
-

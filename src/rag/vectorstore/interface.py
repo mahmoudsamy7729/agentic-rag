@@ -24,3 +24,7 @@ class VectorStore(ABC):
         doc_id: str | None = None,
     ) -> list[RetrievedChunk]:
         """Return top-k most similar chunks."""
+
+    @abstractmethod
+    async def delete_by_doc_id(self, *, doc_id: str) -> None:
+        """Delete all chunks for a given document id."""

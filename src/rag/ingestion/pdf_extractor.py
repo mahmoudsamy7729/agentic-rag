@@ -180,13 +180,17 @@ class PDFPlumberExtractor:
         padded = [row + [""] * (max_cols - len(row)) for row in normalized_rows]
         if pd is not None:
             frame = pd.DataFrame(padded, columns=[f"col_{idx + 1}" for idx in range(max_cols)])
-            markdown = frame.to_markdown(index=False)
-            return f"Table:\n{markdown}".strip()
+            try:
+                markdown = frame.to_markdown(index=False)
+                return f"Table:\n{markdown}".strip()
+            except Exception:
+                # pandas.to_markdown may require optional `tabulate`; fallback to manual markdown.
+                pass
 
         header = " | ".join(f"col_{idx + 1}" for idx in range(max_cols))
         separator = " | ".join("---" for _ in range(max_cols))
-        rows_text = "\n".join(" | ".join(row) for row in padded)
-        return f"Table:\n| {header} |\n| {separator} |\n| {rows_text} |".strip()
+        row_lines = "\n".join(f"| {' | '.join(row)} |" for row in padded)
+        return f"Table:\n| {header} |\n| {separator} |\n{row_lines}".strip()
 
     @staticmethod
     def _word_in_any_table(
