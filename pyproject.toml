@@ -23,4 +23,10 @@ dependencies = [
     "alembic>=1.18.4",
     "fastapi-users[sqlalchemy]>=15.0.4",
     "python-jose>=3.5.0",
+    "aiosqlite>=0.21.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
 ]

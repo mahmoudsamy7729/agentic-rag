@@ -8,8 +8,9 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import src.modules.documents.models  # noqa: F401
+import src.modules.users.models  # noqa: F401
 from src.infrastructure.database import Base
-from src.modules.users import models as _users_models  # noqa: F401
 from src.settings.config import settings
 
 config = context.config

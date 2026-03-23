@@ -1,18 +1,33 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from src.api.v1.dependencies import AgentServiceDep
 from src.api.v1.schemas import AgentAskRequest, AgentAskResponse
+from src.modules.documents import DocumentsRepositoryDep
+from src.modules.users.dependencies import ActiveUserDep
 
 router = APIRouter()
 
 
 @router.post("/agent/ask", response_model=AgentAskResponse)
-async def agent_ask(payload: AgentAskRequest, agent_service: AgentServiceDep):
+async def agent_ask(
+    payload: AgentAskRequest,
+    agent_service: AgentServiceDep,
+    repository: DocumentsRepositoryDep,
+    current_user: ActiveUserDep,
+):
+    document = await repository.get_owned_document(
+        owner_user_id=current_user.id,
+        doc_id=payload.doc_id,
+        include_deleted=False,
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
     result = await agent_service.run(
         question=payload.question,
         doc_id=payload.doc_id,
         session_id=payload.session_id,
-        user_id=payload.user_id,
+        user_id=str(current_user.id),
     )
     return AgentAskResponse(
         status=result.status,

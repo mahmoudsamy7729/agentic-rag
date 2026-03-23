@@ -15,10 +15,6 @@ class AgentCitation(BaseModel):
 class AgentAskRequest(BaseModel):
     question: str = Field(min_length=1, description="User question for the agent.")
     doc_id: str = Field(description="Document id used to scope retrieval for this request.")
-    user_id: str | None = Field(
-        default=None,
-        description="Optional user id propagated to tool execution context.",
-    )
     session_id: str | None = Field(
         default=None,
         description="Optional session id used for tool context.",
