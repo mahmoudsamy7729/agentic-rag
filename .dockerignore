@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.uv-cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+data/chroma
+alembic/versions/__pycache__
+tests

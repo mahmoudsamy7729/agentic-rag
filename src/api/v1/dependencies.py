@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING
 from typing import Annotated
 
 from fastapi import Depends
@@ -19,6 +20,10 @@ from src.rag.vectorstore import VectorStore
 from src.settings.config import settings
 from src.shared.interfaces.llm import LLM
 from src.tools import PingTool, RetrieverTool, ToolRegistry
+
+if TYPE_CHECKING:
+    from src.modules.semantic_cache.repository import SemanticCacheRepository
+    from src.modules.semantic_cache.service import SemanticCacheService
 
 DbSessionDep = Annotated[AsyncSession, Depends(get_db)]
 
@@ -64,6 +69,32 @@ def get_embedding_provider() -> EmbeddingProvider:
 
 
 EmbeddingProviderDep = Annotated[EmbeddingProvider, Depends(get_embedding_provider)]
+
+
+def get_semantic_cache_repository(session: DbSessionDep) -> "SemanticCacheRepository":
+    from src.modules.semantic_cache.repository import SemanticCacheRepository
+
+    return SemanticCacheRepository(session)
+
+
+SemanticCacheRepositoryDep = Annotated[
+    "SemanticCacheRepository", Depends(get_semantic_cache_repository)
+]
+
+
+def get_semantic_cache_service(
+    repository: SemanticCacheRepositoryDep,
+) -> "SemanticCacheService":
+    from src.modules.semantic_cache.service import SemanticCacheService
+
+    return SemanticCacheService(
+        repository=repository,
+        enabled=settings.semantic_cache_enabled,
+        similarity_threshold=settings.semantic_cache_similarity_threshold,
+    )
+
+
+SemanticCacheServiceDep = Annotated["SemanticCacheService", Depends(get_semantic_cache_service)]
 
 
 @lru_cache

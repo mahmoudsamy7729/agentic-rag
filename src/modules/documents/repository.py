@@ -99,6 +99,27 @@ class DocumentsRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def mark_document_indexed(
+        self,
+        *,
+        owner_user_id: UUID,
+        doc_id: str,
+        indexed_at: datetime | None = None,
+    ) -> Document | None:
+        document = await self.get_owned_document(
+            owner_user_id=owner_user_id,
+            doc_id=doc_id,
+            include_deleted=False,
+        )
+        if document is None:
+            return None
+
+        now = indexed_at or datetime.now(timezone.utc)
+        document.last_indexed_at = now
+        document.updated_at = now
+        await self._session.flush()
+        return document
+
     async def commit(self) -> None:
         await self._session.commit()
 
