@@ -24,6 +24,8 @@ class RAGSettings(BaseSettings):
     chroma_persist_dir: str = Field(
         default_factory=lambda: str(Path(__file__).resolve().parents[2] / "data" / "chroma")
     )
+    semantic_cache_enabled: bool = Field(default=True)
+    semantic_cache_similarity_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
 
     def resolved_rag_collection_name(self) -> str:
         if self.rag_collection_name is not None:

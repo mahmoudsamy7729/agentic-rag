@@ -1,4 +1,5 @@
 import ast
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -166,6 +167,79 @@ class FakeLLM(LLM):
             yield ""
 
 
+class FakeEmbeddingProvider:
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(text) for text in texts]
+
+    async def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    @staticmethod
+    def _embed(text: str) -> list[float]:
+        normalized = re.sub(r"\s+", " ", text.strip().lower())
+        checksum = float(sum(ord(char) for char in normalized))
+        return [checksum, float(len(normalized) or 1)]
+
+
+@dataclass
+class FakeSemanticCacheHit:
+    answer: str
+    citations: list[dict]
+
+
+class FakeSemanticCacheService:
+    def __init__(self, *, enabled: bool = True):
+        self._enabled = enabled
+        self._entries: dict[tuple, FakeSemanticCacheHit] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @staticmethod
+    def normalize_question(question: str) -> str:
+        return re.sub(r"\s+", " ", question.strip().lower())
+
+    async def lookup(
+        self,
+        *,
+        owner_user_id: UUID,
+        doc_id: str,
+        doc_version: datetime,
+        model_name: str,
+        query_embedding: list[float],
+    ) -> FakeSemanticCacheHit | None:
+        key = (
+            owner_user_id,
+            doc_id,
+            doc_version,
+            model_name,
+            tuple(query_embedding),
+        )
+        return self._entries.get(key)
+
+    async def store(
+        self,
+        *,
+        owner_user_id: UUID,
+        doc_id: str,
+        doc_version: datetime,
+        model_name: str,
+        question_normalized: str,
+        question_embedding: list[float],
+        answer: str,
+        citations: list[dict],
+    ) -> None:
+        key = (
+            owner_user_id,
+            doc_id,
+            doc_version,
+            model_name,
+            tuple(question_embedding),
+        )
+        self._entries[key] = FakeSemanticCacheHit(answer=answer, citations=citations)
+
+
 @dataclass
 class FakeUser:
     id: UUID
@@ -179,6 +253,7 @@ class FakeDocument:
     source: str | None
     created_at: datetime
     updated_at: datetime
+    last_indexed_at: datetime | None = None
     deleted_at: datetime | None = None
 
 
@@ -194,6 +269,7 @@ class FakeDocumentsRepository:
             source=source,
             created_at=now,
             updated_at=now,
+            last_indexed_at=None,
             deleted_at=None,
         )
         self._items[doc_id] = doc
@@ -240,6 +316,25 @@ class FakeDocumentsRepository:
             return True
         return item.deleted_at is None
 
+    async def mark_document_indexed(
+        self,
+        *,
+        owner_user_id: UUID,
+        doc_id: str,
+        indexed_at: datetime | None = None,
+    ):
+        item = await self.get_owned_document(
+            owner_user_id=owner_user_id,
+            doc_id=doc_id,
+            include_deleted=False,
+        )
+        if item is None:
+            return None
+        now = indexed_at or datetime.now(timezone.utc)
+        item.last_indexed_at = now
+        item.updated_at = now
+        return item
+
     async def commit(self) -> None:
         return None
 
@@ -253,6 +348,8 @@ def _build_client():
     retrieval_service = FakeRetrievalService(store)
     docs_repo = FakeDocumentsRepository()
     owner = FakeUser(id=uuid4())
+    embedding_provider = FakeEmbeddingProvider()
+    semantic_cache_service = FakeSemanticCacheService(enabled=True)
     registry = ToolRegistry(
         [
             PingTool(),
@@ -264,6 +361,8 @@ def _build_client():
     app.dependency_overrides[deps.get_rag_ingestion_service] = lambda: ingestion_service
     app.dependency_overrides[deps.get_tool_registry] = lambda: registry
     app.dependency_overrides[deps.get_llm] = lambda: llm
+    app.dependency_overrides[deps.get_embedding_provider] = lambda: embedding_provider
+    app.dependency_overrides[deps.get_semantic_cache_service] = lambda: semantic_cache_service
     app.dependency_overrides[deps.get_vector_store] = lambda: FakeVectorStore()
     app.dependency_overrides[get_documents_repository] = lambda: docs_repo
     app.dependency_overrides[active_user] = lambda: owner
@@ -318,8 +417,23 @@ def test_end_to_end_rag_flow_with_doc_scoped_citations():
         body_fr = ask_fr.json()
         assert ask_fr.status_code == 200
         assert body_fr["status"] == "ok"
+        assert body_fr["cache_status"] == "miss"
         assert len(body_fr["citations"]) >= 1
         assert all(c["doc_id"] == "doc-fr" for c in body_fr["citations"])
+
+        ask_fr_again = client.post(
+            "/agent/ask",
+            json={
+                "question": "What is the capital?",
+                "doc_id": "doc-fr",
+                "session_id": "s-1",
+            },
+        )
+        body_fr_again = ask_fr_again.json()
+        assert ask_fr_again.status_code == 200
+        assert body_fr_again["cache_status"] == "hit"
+        assert body_fr_again["steps"] == 0
+        assert body_fr_again["tools_used"] == []
 
         ask_eg = client.post(
             "/agent/ask",
@@ -332,6 +446,7 @@ def test_end_to_end_rag_flow_with_doc_scoped_citations():
         body_eg = ask_eg.json()
         assert ask_eg.status_code == 200
         assert body_eg["status"] == "ok"
+        assert body_eg["cache_status"] == "miss"
         assert len(body_eg["citations"]) >= 1
         assert all(c["doc_id"] == "doc-eg" for c in body_eg["citations"])
     finally:
@@ -368,6 +483,7 @@ def test_ingest_pdf_and_page_number_citations():
 
         assert ask.status_code == 200
         assert ask_body["status"] == "ok"
+        assert ask_body["cache_status"] == "miss"
         assert len(ask_body["citations"]) >= 1
         assert ask_body["citations"][0]["doc_id"] == "doc-pdf"
         assert ask_body["citations"][0]["source"] == "policy-pdf"

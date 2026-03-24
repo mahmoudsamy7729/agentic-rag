@@ -45,6 +45,10 @@ async def ingest_text(
             source=payload.source,
             doc_id=resolved_doc_id,
         )
+        await repository.mark_document_indexed(
+            owner_user_id=current_user.id,
+            doc_id=resolved_doc_id,
+        )
         await repository.commit()
     except ValueError as exc:
         await repository.rollback()
@@ -101,6 +105,10 @@ async def ingest_pdf(
         result = await ingestion_service.ingest_pdf(
             pdf_bytes=payload,
             source=resolved_source,
+            doc_id=resolved_doc_id,
+        )
+        await repository.mark_document_indexed(
+            owner_user_id=current_user.id,
             doc_id=resolved_doc_id,
         )
         await repository.commit()
