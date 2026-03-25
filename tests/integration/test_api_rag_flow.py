@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 pytest.importorskip("chromadb")
 
 from main import app
-from src.agents import AgentService
+from src.agents import AgentCitation, AgentResult, AgentService
 from src.api.v1 import dependencies as deps
 from src.modules.documents.dependencies import get_documents_repository
 from src.modules.users.dependencies import active_user
@@ -167,6 +167,32 @@ class FakeLLM(LLM):
             yield ""
 
 
+
+class FakeNoAnswerAgentService:
+    async def run(
+        self,
+        *,
+        question: str,
+        doc_id: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> AgentResult:
+        return AgentResult(
+            answer="I could not find the answer in the provided documents.",
+            steps=1,
+            tools_used=["retrieve_context"],
+            status="ok",
+            citations=[
+                AgentCitation(
+                    source="inline-text",
+                    doc_id=doc_id,
+                    chunk_id="chunk-0",
+                    snippet="Some snippet",
+                    page_number=None,
+                )
+            ],
+        )
+
 class FakeEmbeddingProvider:
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._embed(text) for text in texts]
@@ -179,6 +205,23 @@ class FakeEmbeddingProvider:
         normalized = re.sub(r"\s+", " ", text.strip().lower())
         checksum = float(sum(ord(char) for char in normalized))
         return [checksum, float(len(normalized) or 1)]
+
+
+class FakeQueryRefinementService:
+    @staticmethod
+    async def refine(*, question: str, doc_id: str):
+        lowered = question.lower()
+        if "capital" in lowered or "city" in lowered:
+            refined = f"capital city for {doc_id}"
+        elif "refund" in lowered:
+            refined = f"refund policy for {doc_id}"
+        else:
+            refined = question.strip()
+        return type(
+            "Refinement",
+            (),
+            {"refined_query": refined, "used_fallback": refined == question.strip()},
+        )()
 
 
 @dataclass
@@ -349,6 +392,7 @@ def _build_client():
     docs_repo = FakeDocumentsRepository()
     owner = FakeUser(id=uuid4())
     embedding_provider = FakeEmbeddingProvider()
+    query_refinement_service = FakeQueryRefinementService()
     semantic_cache_service = FakeSemanticCacheService(enabled=True)
     registry = ToolRegistry(
         [
@@ -361,6 +405,7 @@ def _build_client():
     app.dependency_overrides[deps.get_rag_ingestion_service] = lambda: ingestion_service
     app.dependency_overrides[deps.get_tool_registry] = lambda: registry
     app.dependency_overrides[deps.get_llm] = lambda: llm
+    app.dependency_overrides[deps.get_query_refinement_service] = lambda: query_refinement_service
     app.dependency_overrides[deps.get_embedding_provider] = lambda: embedding_provider
     app.dependency_overrides[deps.get_semantic_cache_service] = lambda: semantic_cache_service
     app.dependency_overrides[deps.get_vector_store] = lambda: FakeVectorStore()
@@ -418,13 +463,14 @@ def test_end_to_end_rag_flow_with_doc_scoped_citations():
         assert ask_fr.status_code == 200
         assert body_fr["status"] == "ok"
         assert body_fr["cache_status"] == "miss"
+        assert body_fr["refined_query"] == "capital city for doc-fr"
         assert len(body_fr["citations"]) >= 1
         assert all(c["doc_id"] == "doc-fr" for c in body_fr["citations"])
 
         ask_fr_again = client.post(
             "/agent/ask",
             json={
-                "question": "What is the capital?",
+                "question": "Capital city?",
                 "doc_id": "doc-fr",
                 "session_id": "s-1",
             },
@@ -432,6 +478,7 @@ def test_end_to_end_rag_flow_with_doc_scoped_citations():
         body_fr_again = ask_fr_again.json()
         assert ask_fr_again.status_code == 200
         assert body_fr_again["cache_status"] == "hit"
+        assert body_fr_again["refined_query"] == "capital city for doc-fr"
         assert body_fr_again["steps"] == 0
         assert body_fr_again["tools_used"] == []
 
@@ -447,11 +494,57 @@ def test_end_to_end_rag_flow_with_doc_scoped_citations():
         assert ask_eg.status_code == 200
         assert body_eg["status"] == "ok"
         assert body_eg["cache_status"] == "miss"
+        assert body_eg["refined_query"] == "capital city for doc-eg"
         assert len(body_eg["citations"]) >= 1
         assert all(c["doc_id"] == "doc-eg" for c in body_eg["citations"])
     finally:
         app.dependency_overrides.clear()
 
+
+
+def test_no_answer_fallback_is_never_cached():
+    client = _build_client()
+    try:
+        ingest = client.post(
+            "/rag/ingest/text",
+            json={
+                "text": "Paris is the capital of France.",
+                "source": "wiki-france",
+                "doc_id": "doc-no-answer",
+            },
+        )
+        assert ingest.status_code == 200
+
+        app.dependency_overrides[deps.get_agent_service] = lambda: FakeNoAnswerAgentService()
+
+        ask_first = client.post(
+            "/agent/ask",
+            json={
+                "question": "unknown query",
+                "doc_id": "doc-no-answer",
+                "session_id": "s-1",
+            },
+        )
+        body_first = ask_first.json()
+        assert ask_first.status_code == 200
+        assert body_first["cache_status"] == "miss"
+        assert body_first["answer"] == "I could not find the answer in the provided documents."
+
+        ask_second = client.post(
+            "/agent/ask",
+            json={
+                "question": "unknown query",
+                "doc_id": "doc-no-answer",
+                "session_id": "s-1",
+            },
+        )
+        body_second = ask_second.json()
+        assert ask_second.status_code == 200
+        assert body_second["cache_status"] == "miss"
+        assert body_second["steps"] > 0
+        assert body_second["answer"] == "I could not find the answer in the provided documents."
+    finally:
+        app.dependency_overrides.clear()
 
 def test_ingest_pdf_and_page_number_citations():
     client = _build_client()
@@ -484,6 +577,7 @@ def test_ingest_pdf_and_page_number_citations():
         assert ask.status_code == 200
         assert ask_body["status"] == "ok"
         assert ask_body["cache_status"] == "miss"
+        assert ask_body["refined_query"] == "refund policy for doc-pdf"
         assert len(ask_body["citations"]) >= 1
         assert ask_body["citations"][0]["doc_id"] == "doc-pdf"
         assert ask_body["citations"][0]["source"] == "policy-pdf"
@@ -567,3 +661,4 @@ def test_ingest_empty_text_returns_422():
         assert response.status_code == 422
     finally:
         app.dependency_overrides.clear()
+

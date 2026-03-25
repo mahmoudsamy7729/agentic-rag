@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from src.agents.cache_policy import is_cacheable_rag_answer
+from src.agents.cache_policy import is_cacheable_rag_answer, is_no_answer_fallback
 from src.modules.semantic_cache.service import SemanticCacheService
 
 
@@ -150,3 +150,14 @@ def test_cacheable_policy_only_retriever_and_non_empty_citations():
         tools_used=["retrieve_context"],
         citations=[],
     )
+
+
+def test_no_answer_fallback_policy_detects_canonical_phrase():
+    assert is_no_answer_fallback(
+        "  I could not find the answer in the provided documents. "
+    )
+    assert is_no_answer_fallback("No   relevant   context found.")
+
+
+def test_no_answer_fallback_policy_allows_grounded_answers():
+    assert not is_no_answer_fallback("Paris is the capital of France.")

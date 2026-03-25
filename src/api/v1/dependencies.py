@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents import AgentService
+from src.agents import AgentService, QueryRefinementService
 from src.infrastructure.database import get_db
 from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingProvider
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
@@ -43,6 +43,20 @@ def get_llm() -> LLM:
 
 
 LLMDep = Annotated[LLM, Depends(get_llm)]
+
+
+def get_query_refinement_service(llm: LLMDep) -> QueryRefinementService:
+    return QueryRefinementService(
+        llm=llm,
+        enabled=settings.query_refinement_enabled,
+        temperature=settings.query_refinement_temperature,
+        max_tokens=settings.query_refinement_max_tokens,
+    )
+
+
+QueryRefinementServiceDep = Annotated[
+    QueryRefinementService, Depends(get_query_refinement_service)
+]
 
 
 @lru_cache

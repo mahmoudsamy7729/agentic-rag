@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException
 
-from src.agents.cache_policy import is_cacheable_rag_answer
+from src.agents.cache_policy import is_cacheable_rag_answer, is_no_answer_fallback
 from src.api.v1.dependencies import (
     AgentServiceDep,
     EmbeddingProviderDep,
     LLMDep,
+    QueryRefinementServiceDep,
     SemanticCacheServiceDep,
 )
 from src.api.v1.schemas import AgentAskRequest, AgentAskResponse
@@ -19,6 +20,7 @@ async def agent_ask(
     payload: AgentAskRequest,
     agent_service: AgentServiceDep,
     llm: LLMDep,
+    query_refinement_service: QueryRefinementServiceDep,
     embedding_provider: EmbeddingProviderDep,
     semantic_cache_service: SemanticCacheServiceDep,
     repository: DocumentsRepositoryDep,
@@ -32,7 +34,12 @@ async def agent_ask(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    normalized_question = semantic_cache_service.normalize_question(payload.question)
+    refinement = await query_refinement_service.refine(
+        question=payload.question,
+        doc_id=payload.doc_id,
+    )
+    refined_query = refinement.refined_query
+    normalized_question = semantic_cache_service.normalize_question(refined_query)
     query_embedding: list[float] | None = None
     if semantic_cache_service.enabled and document.last_indexed_at is not None:
         try:
@@ -48,6 +55,7 @@ async def agent_ask(
                 return AgentAskResponse(
                     status="ok",
                     cache_status="hit",
+                    refined_query=refined_query,
                     answer=cache_hit.answer,
                     steps=0,
                     tools_used=[],
@@ -58,7 +66,7 @@ async def agent_ask(
             pass
 
     result = await agent_service.run(
-        question=payload.question,
+        question=refined_query,
         doc_id=payload.doc_id,
         session_id=payload.session_id,
         user_id=str(current_user.id),
@@ -78,10 +86,12 @@ async def agent_ask(
         tools_used=result.tools_used,
         citations=citations,
     )
+    should_skip_cache = is_no_answer_fallback(result.answer)
     if (
         semantic_cache_service.enabled
         and document.last_indexed_at is not None
         and is_rag_backed
+        and not should_skip_cache
     ):
         try:
             if query_embedding is None:
@@ -103,6 +113,7 @@ async def agent_ask(
     return AgentAskResponse(
         status=result.status,
         cache_status="miss",
+        refined_query=refined_query,
         answer=result.answer,
         steps=result.steps,
         tools_used=result.tools_used,

@@ -26,6 +26,9 @@ class RAGSettings(BaseSettings):
     )
     semantic_cache_enabled: bool = Field(default=True)
     semantic_cache_similarity_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
+    query_refinement_enabled: bool = Field(default=True)
+    query_refinement_max_tokens: int = Field(default=64, ge=1, le=512)
+    query_refinement_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
     def resolved_rag_collection_name(self) -> str:
         if self.rag_collection_name is not None:
