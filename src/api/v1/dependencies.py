@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import TYPE_CHECKING
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Awaitable, Callable
+from uuid import UUID
 
 from fastapi import Depends
+from src.infrastructure.database import AsyncSessionFactory
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents import AgentService, QueryRefinementService
@@ -22,6 +23,8 @@ from src.shared.interfaces.llm import LLM
 from src.tools import PingTool, RetrieverTool, ToolRegistry
 
 if TYPE_CHECKING:
+    from src.modules.evaluation.repository import EvaluationRepository
+    from src.modules.evaluation.service import EvaluationService
     from src.modules.semantic_cache.repository import SemanticCacheRepository
     from src.modules.semantic_cache.service import SemanticCacheService
 
@@ -43,6 +46,22 @@ def get_llm() -> LLM:
 
 
 LLMDep = Annotated[LLM, Depends(get_llm)]
+
+
+@lru_cache
+def get_judge_llm() -> LLM:
+    if not settings.openai_key:
+        raise RuntimeError("Missing OPENAI_KEY in environment.")
+    if not settings.eval_judge_model:
+        raise RuntimeError("Missing EVAL_JUDGE_MODEL in environment.")
+    return OpenAILLM(
+        api_key=settings.openai_key,
+        model=settings.eval_judge_model,
+        base_url=settings.ollama_base_url,
+    )
+
+
+JudgeLLMDep = Annotated[LLM, Depends(get_judge_llm)]
 
 
 def get_query_refinement_service(llm: LLMDep) -> QueryRefinementService:
@@ -212,3 +231,69 @@ def get_agent_service(llm: LLMDep, registry: ToolRegistryDep) -> AgentService:
 
 
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
+
+
+def get_evaluation_repository(session: DbSessionDep) -> "EvaluationRepository":
+    from src.modules.evaluation.repository import EvaluationRepository
+
+    return EvaluationRepository(session)
+
+
+EvaluationRepositoryDep = Annotated[
+    "EvaluationRepository", Depends(get_evaluation_repository)
+]
+
+
+def get_evaluation_judge_service(judge_llm: JudgeLLMDep):
+    from src.modules.evaluation.judge import EvaluationJudgeService
+
+    return EvaluationJudgeService(llm=judge_llm)
+
+
+EvaluationJudgeServiceDep = Annotated[
+    "EvaluationJudgeService", Depends(get_evaluation_judge_service)
+]
+
+
+def get_evaluation_service(
+    repository: EvaluationRepositoryDep,
+    judge_service: EvaluationJudgeServiceDep,
+) -> "EvaluationService":
+    from src.modules.evaluation.service import EvaluationService
+
+    return EvaluationService(
+        repository=repository,
+        retrieval_service=get_rag_retrieval_service(),
+        agent_service=get_agent_service(get_llm(), get_tool_registry()),
+        judge_service=judge_service,
+        max_cases=settings.eval_max_cases,
+    )
+
+
+EvaluationServiceDep = Annotated["EvaluationService", Depends(get_evaluation_service)]
+
+
+async def run_evaluation_job(run_id: UUID) -> None:
+    from src.modules.evaluation.judge import EvaluationJudgeService
+    from src.modules.evaluation.repository import EvaluationRepository
+    from src.modules.evaluation.service import EvaluationService
+
+    async with AsyncSessionFactory() as session:
+        repository = EvaluationRepository(session)
+        service = EvaluationService(
+            repository=repository,
+            retrieval_service=get_rag_retrieval_service(),
+            agent_service=get_agent_service(get_llm(), get_tool_registry()),
+            judge_service=EvaluationJudgeService(llm=get_judge_llm()),
+            max_cases=settings.eval_max_cases,
+        )
+        await service.execute_run(run_id=run_id)
+
+
+def get_evaluation_job_runner() -> Callable[[UUID], Awaitable[None]]:
+    return run_evaluation_job
+
+
+EvaluationJobRunnerDep = Annotated[
+    Callable[[UUID], Awaitable[None]], Depends(get_evaluation_job_runner)
+]

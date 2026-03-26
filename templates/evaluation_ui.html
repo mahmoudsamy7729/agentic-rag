@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Evaluation</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #d8dee9;
+      --accent: #0f766e;
+      --accent-soft: #ccfbf1;
+      --surface: #ffffff;
+      --danger: #b91c1c;
+      --ok: #166534;
+      --mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+      --sans: "General Sans", "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1200px 400px at 80% -10%, #dbeafe 0%, transparent 70%),
+        radial-gradient(900px 320px at -10% 0%, #e0f2fe 0%, transparent 60%),
+        var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+      animation: fadeIn 320ms ease-out;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .title {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: -0.02em;
+      font-weight: 700;
+    }
+    .subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .status-pill {
+      font-family: var(--mono);
+      font-size: 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: var(--surface);
+      min-width: 120px;
+      text-align: center;
+    }
+    .grid {
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: minmax(280px, 340px) 1fr;
+      gap: 20px;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    }
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .form-row { margin-bottom: 12px; }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    input[type="text"], textarea, input[type="file"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px;
+      font-size: 14px;
+      font-family: var(--sans);
+    }
+    textarea {
+      resize: vertical;
+      min-height: 110px;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      padding: 9px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: #0d9488; border-color: #0d9488; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: linear-gradient(180deg, #fff, #fbfdff);
+    }
+    .metric .k {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .metric .v {
+      margin-top: 6px;
+      font-family: var(--mono);
+      font-size: 17px;
+      color: var(--ink);
+    }
+    .table-wrap {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: #fff;
+    }
+    th, td {
+      border-bottom: 1px solid #edf2f7;
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: #f9fafb;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tr:last-child td { border-bottom: none; }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .run-meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .message {
+      margin-top: 12px;
+      border: 1px dashed var(--line);
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 13px;
+      background: #fff;
+      min-height: 40px;
+    }
+    .message.error { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
+    .message.ok { border-color: #bbf7d0; background: #f0fdf4; color: var(--ok); }
+    @media (max-width: 1020px) {
+      .grid { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="topbar">
+      <div>
+        <h1 class="title">RAG Evaluation Console</h1>
+        <p class="subtitle">Upload JSONL dataset, track run progress, and inspect retrieval + judge metrics.</p>
+      </div>
+      <div id="runStatusPill" class="status-pill">idle</div>
+    </header>
+
+    <section class="grid">
+      <aside class="panel">
+        <h2>Run Setup</h2>
+        <div class="form-row">
+          <label for="jwtToken">JWT Token</label>
+          <textarea id="jwtToken" placeholder="Paste Bearer token"></textarea>
+        </div>
+        <div class="form-row">
+          <label for="docId">Document ID</label>
+          <input id="docId" type="text" placeholder="doc-..." />
+        </div>
+        <div class="form-row">
+          <label for="datasetFile">Dataset (.jsonl)</label>
+          <input id="datasetFile" type="file" accept=".jsonl,application/json,text/plain" />
+        </div>
+        <div class="actions">
+          <button id="startBtn" class="btn-primary" type="button">Start Evaluation</button>
+          <button id="refreshBtn" type="button">Refresh Status</button>
+          <button id="downloadBtn" type="button">Download Report JSON</button>
+        </div>
+        <div id="messageBox" class="message">Ready.</div>
+      </aside>
+
+      <section class="panel">
+        <h2>Run Status</h2>
+        <div class="run-meta" id="runMeta">No run started yet.</div>
+        <div class="metrics">
+          <div class="metric"><div class="k">Processed</div><div class="v" id="mProcessed">-</div></div>
+          <div class="metric"><div class="k">Hit@k</div><div class="v" id="mHit">-</div></div>
+          <div class="metric"><div class="k">Recall@k</div><div class="v" id="mRecall">-</div></div>
+          <div class="metric"><div class="k">MRR</div><div class="v" id="mMrr">-</div></div>
+          <div class="metric"><div class="k">Accuracy</div><div class="v" id="mAcc">-</div></div>
+          <div class="metric"><div class="k">Completeness</div><div class="v" id="mComp">-</div></div>
+          <div class="metric"><div class="k">Relevance</div><div class="v" id="mRel">-</div></div>
+          <div class="metric"><div class="k">Groundedness</div><div class="v" id="mGround">-</div></div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Question</th>
+                <th>Retrieval</th>
+                <th>Judge</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="casesBody">
+              <tr><td colspan="5" class="mono">No case results yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const pollIntervalMs = Number({{ poll_interval_ms | tojson }});
+    const state = { runId: null, timer: null };
+
+    const el = {
+      token: document.getElementById("jwtToken"),
+      docId: document.getElementById("docId"),
+      file: document.getElementById("datasetFile"),
+      start: document.getElementById("startBtn"),
+      refresh: document.getElementById("refreshBtn"),
+      download: document.getElementById("downloadBtn"),
+      message: document.getElementById("messageBox"),
+      statusPill: document.getElementById("runStatusPill"),
+      runMeta: document.getElementById("runMeta"),
+      mProcessed: document.getElementById("mProcessed"),
+      mHit: document.getElementById("mHit"),
+      mRecall: document.getElementById("mRecall"),
+      mMrr: document.getElementById("mMrr"),
+      mAcc: document.getElementById("mAcc"),
+      mComp: document.getElementById("mComp"),
+      mRel: document.getElementById("mRel"),
+      mGround: document.getElementById("mGround"),
+      casesBody: document.getElementById("casesBody"),
+    };
+
+    function setMessage(text, kind = "") {
+      el.message.textContent = text;
+      el.message.className = "message" + (kind ? " " + kind : "");
+    }
+
+    function fmt(value, digits = 3) {
+      if (value === null || value === undefined) return "-";
+      if (typeof value !== "number") return String(value);
+      return value.toFixed(digits);
+    }
+
+    function authHeaders(extra = {}) {
+      const token = el.token.value.trim();
+      if (!token) return extra;
+      return { ...extra, Authorization: `Bearer ${token}` };
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = body && body.detail ? body.detail : response.statusText;
+        throw new Error(String(detail));
+      }
+      return body;
+    }
+
+    function renderRun(run) {
+      el.statusPill.textContent = run.run_status;
+      el.runMeta.textContent =
+        `run=${run.run_id} | doc=${run.doc_id} | dataset=${run.dataset_name}`;
+      el.mProcessed.textContent = `${run.processed_cases}/${run.total_cases}`;
+      el.mHit.textContent = fmt(run.hit_at_k);
+      el.mRecall.textContent = fmt(run.recall_at_k);
+      el.mMrr.textContent = fmt(run.mrr);
+      el.mAcc.textContent = fmt(run.accuracy_avg, 2);
+      el.mComp.textContent = fmt(run.completeness_avg, 2);
+      el.mRel.textContent = fmt(run.relevance_avg, 2);
+      el.mGround.textContent = fmt(run.groundedness_avg, 2);
+    }
+
+    function renderCases(items) {
+      if (!items.length) {
+        el.casesBody.innerHTML = `<tr><td colspan="5" class="mono">No case rows.</td></tr>`;
+        return;
+      }
+      el.casesBody.innerHTML = items
+        .map((item) => {
+          const judge = [item.accuracy, item.completeness, item.relevance, item.groundedness]
+            .map((v) => (v == null ? "-" : v))
+            .join("/");
+          const retrieval = `hit=${item.hit ?? "-"} | recall=${fmt(item.recall)} | rr=${fmt(item.reciprocal_rank)}`;
+          return `
+            <tr>
+              <td class="mono">${item.case_index}</td>
+              <td>${item.question}</td>
+              <td class="mono">${retrieval}</td>
+              <td class="mono">${judge}</td>
+              <td class="mono">${item.case_status}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    }
+
+    async function refreshRun() {
+      if (!state.runId) return;
+      const run = await fetchJson(`/evaluations/${state.runId}`, {
+        headers: authHeaders(),
+      });
+      renderRun(run);
+
+      const cases = await fetchJson(`/evaluations/${state.runId}/cases?limit=50&offset=0`, {
+        headers: authHeaders(),
+      });
+      renderCases(cases.items || []);
+
+      if (run.run_status === "completed" || run.run_status === "failed") {
+        stopPolling();
+        setMessage(run.run_status === "completed" ? "Run completed." : (run.error_message || "Run failed."), run.run_status === "completed" ? "ok" : "error");
+      }
+    }
+
+    function stopPolling() {
+      if (state.timer) {
+        clearInterval(state.timer);
+        state.timer = null;
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      state.timer = setInterval(() => {
+        refreshRun().catch((err) => setMessage(err.message, "error"));
+      }, pollIntervalMs);
+    }
+
+    el.start.addEventListener("click", async () => {
+      try {
+        const docId = el.docId.value.trim();
+        const file = el.file.files && el.file.files[0];
+        if (!docId) throw new Error("doc_id is required.");
+        if (!file) throw new Error("JSONL file is required.");
+
+        const form = new FormData();
+        form.append("doc_id", docId);
+        form.append("file", file);
+
+        const run = await fetchJson("/evaluations/rag", {
+          method: "POST",
+          headers: authHeaders(),
+          body: form,
+        });
+        state.runId = run.run_id;
+        setMessage(`Run queued: ${run.run_id}`, "ok");
+        await refreshRun();
+        startPolling();
+      } catch (err) {
+        setMessage(err.message || "Failed to start run.", "error");
+      }
+    });
+
+    el.refresh.addEventListener("click", async () => {
+      try {
+        await refreshRun();
+        setMessage("Status refreshed.", "ok");
+      } catch (err) {
+        setMessage(err.message || "Failed to refresh.", "error");
+      }
+    });
+
+    el.download.addEventListener("click", async () => {
+      try {
+        if (!state.runId) throw new Error("No run selected.");
+        const report = await fetchJson(`/evaluations/${state.runId}/report`, {
+          headers: authHeaders(),
+        });
+        const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `evaluation-report-${state.runId}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        setMessage(err.message || "Failed to download report.", "error");
+      }
+    });
+  </script>
+</body>
+</html>
+

@@ -7,12 +7,19 @@ from src.settings.agent import AgentSettings
 from src.settings.rag import RAGSettings
 from src.settings.database import DatabaseSettings
 from src.settings.auth import AuthSettings
+from src.settings.evaluation import EvaluationSettings
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
-class Settings(AISettings, AgentSettings, 
-    RAGSettings, DatabaseSettings, AuthSettings):
+class Settings(
+    AISettings,
+    AgentSettings,
+    RAGSettings,
+    DatabaseSettings,
+    AuthSettings,
+    EvaluationSettings,
+):
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
