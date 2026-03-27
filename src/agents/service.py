@@ -7,9 +7,18 @@ from src.shared.interfaces.llm import ChatMessage, GenerationConfig, LLM, Messag
 from src.shared.interfaces.tool import ToolContext
 from src.tools import ToolRegistry
 
+NO_ANSWER_FALLBACK = "I could not find the answer in the provided documents."
+
 DEFAULT_SYSTEM_PROMPT = (
-    "You are an agentic assistant. "
-    "Use available tools when needed, then provide a final answer."
+    "You are a strict RAG assistant. You must answer only from retrieved tool outputs.\n\n"
+    "Rules:\n"
+    f"- If retrieval does not explicitly contain the answer, reply exactly: '{NO_ANSWER_FALLBACK}'\n"
+    "- Do not infer, guess, or use prior knowledge.\n"
+    "- Do not add details not present in retrieved context.\n"
+    "- Every factual bullet must end with its supporting citation in this format: [chunk_id].\n\n"
+    "Output format:\n"
+    "- Return only bullet points.\n"
+    "- Each bullet must end with one citation tag such as [chunk-12].\n"
 )
 
 
@@ -87,12 +96,21 @@ class AgentService:
             )
 
             if not response.tool_calls:
+                citations = self._extract_citations(latest_retrieval_payload)
+                if not citations:
+                    return AgentResult(
+                        answer=NO_ANSWER_FALLBACK,
+                        steps=step,
+                        tools_used=tools_used,
+                        status="ok",
+                        citations=[],
+                    )
                 return AgentResult(
-                    answer=response.content,
+                    answer=(response.content or "").strip() or NO_ANSWER_FALLBACK,
                     steps=step,
                     tools_used=tools_used,
                     status="ok",
-                    citations=self._extract_citations(latest_retrieval_payload),
+                    citations=citations,
                 )
 
             for tool_call in response.tool_calls:
@@ -148,12 +166,15 @@ class AgentService:
             snippet = str(item.get("text", "")).strip()
             if not snippet:
                 continue
+            chunk_id = str(item.get("chunk_id", "")).strip()
+            if not chunk_id:
+                continue
 
             citations.append(
                 AgentCitation(
                     source=str(item.get("source", "unknown")),
                     doc_id=str(item.get("doc_id", "")),
-                    chunk_id=str(item.get("chunk_id", "")),
+                    chunk_id=chunk_id,
                     snippet=snippet[:280],
                     page_number=AgentService._to_int(item.get("page_number")),
                 )

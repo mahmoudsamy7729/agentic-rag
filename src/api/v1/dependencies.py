@@ -233,6 +233,19 @@ def get_agent_service(llm: LLMDep, registry: ToolRegistryDep) -> AgentService:
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
 
 
+@lru_cache
+def get_evaluation_agent_service() -> AgentService:
+    return AgentService(
+        llm=get_llm(),
+        registry=get_tool_registry(),
+        max_steps=settings.agent_max_steps,
+        temperature=0.0,
+        max_tokens=settings.agent_max_tokens,
+        timeout_s=settings.agent_timeout_s,
+        system_prompt=settings.agent_system_prompt,
+    )
+
+
 def get_evaluation_repository(session: DbSessionDep) -> "EvaluationRepository":
     from src.modules.evaluation.repository import EvaluationRepository
 
@@ -247,7 +260,11 @@ EvaluationRepositoryDep = Annotated[
 def get_evaluation_judge_service(judge_llm: JudgeLLMDep):
     from src.modules.evaluation.judge import EvaluationJudgeService
 
-    return EvaluationJudgeService(llm=judge_llm)
+    return EvaluationJudgeService(
+        llm=judge_llm,
+        max_tokens=settings.eval_judge_max_tokens,
+        timeout_s=settings.eval_judge_timeout_s,
+    )
 
 
 EvaluationJudgeServiceDep = Annotated[
@@ -264,7 +281,7 @@ def get_evaluation_service(
     return EvaluationService(
         repository=repository,
         retrieval_service=get_rag_retrieval_service(),
-        agent_service=get_agent_service(get_llm(), get_tool_registry()),
+        agent_service=get_evaluation_agent_service(),
         judge_service=judge_service,
         max_cases=settings.eval_max_cases,
     )
@@ -283,8 +300,12 @@ async def run_evaluation_job(run_id: UUID) -> None:
         service = EvaluationService(
             repository=repository,
             retrieval_service=get_rag_retrieval_service(),
-            agent_service=get_agent_service(get_llm(), get_tool_registry()),
-            judge_service=EvaluationJudgeService(llm=get_judge_llm()),
+            agent_service=get_evaluation_agent_service(),
+            judge_service=EvaluationJudgeService(
+                llm=get_judge_llm(),
+                max_tokens=settings.eval_judge_max_tokens,
+                timeout_s=settings.eval_judge_timeout_s,
+            ),
             max_cases=settings.eval_max_cases,
         )
         await service.execute_run(run_id=run_id)

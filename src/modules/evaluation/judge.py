@@ -9,8 +9,9 @@ from src.shared.interfaces.llm import ChatMessage, GenerationConfig, LLM, Messag
 
 JUDGE_SYSTEM_PROMPT = (
     "You are an expert evaluator for RAG answers.\n"
-    "Evaluate generated answers against reference answers and cited context.\n"
-    "Return ONLY valid JSON.\n"
+    "Evaluate the generated answer against the reference answer and citations.\n"
+    "Return STRICT JSON only.\n"
+    "No markdown. No prose outside JSON. No code fences.\n"
 )
 
 
@@ -24,9 +25,20 @@ class JudgeScore:
 
 
 class EvaluationJudgeService:
-    def __init__(self, *, llm: LLM) -> None:
+    def __init__(
+        self,
+        *,
+        llm: LLM,
+        max_tokens: int = 600,
+        timeout_s: float = 60.0,
+    ) -> None:
         self._llm = llm
-        self._config = GenerationConfig(temperature=0.0, max_tokens=350)
+        self._config = GenerationConfig(
+            temperature=0.0,
+            max_tokens=max_tokens,
+            timeout_s=timeout_s,
+            response_format={"type": "json_object"},
+        )
 
     async def evaluate(
         self,
@@ -49,16 +61,21 @@ class EvaluationJudgeService:
                     f"{reference_answer}\n\n"
                     "Citations:\n"
                     f"{json.dumps(citations, ensure_ascii=False)}\n\n"
-                    "Score on four dimensions from 1 to 5:\n"
-                    "1. Accuracy\n"
-                    "2. Completeness\n"
-                    "3. Relevance\n"
-                    "4. Groundedness (supported by citations)\n\n"
-                    "Rules:\n"
-                    "- If generated answer is factually wrong, accuracy must be 1.\n"
-                    "- 5 means perfect.\n"
-                    "- Return JSON only with fields: "
-                    "accuracy, completeness, relevance, groundedness, feedback."
+                    "Return exactly one JSON object with this schema:\n"
+                    "{\n"
+                    '  "accuracy": <integer 1-5>,\n'
+                    '  "completeness": <integer 1-5>,\n'
+                    '  "relevance": <integer 1-5>,\n'
+                    '  "groundedness": <integer 1-5>,\n'
+                    '  "feedback": <short string>\n'
+                    "}\n\n"
+                    "Scoring rules:\n"
+                    "- Accuracy: factual correctness vs reference answer.\n"
+                    "- Completeness: coverage of required points.\n"
+                    "- Relevance: directness to the question without irrelevant details.\n"
+                    "- Groundedness: claims are supported by citations.\n"
+                    "- If generated answer is factually wrong, set accuracy=1.\n"
+                    "- Score 5 only for near-perfect performance.\n"
                 ),
             ),
         ]
