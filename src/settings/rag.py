@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings
 
 class RAGSettings(BaseSettings):
     rag_collection_name: str | None = Field(default=None)
-    rag_top_k: int = Field(default=5, ge=1, le=100)
-    rag_prefetch_k: int = Field(default=50, ge=1, le=200)
+    rag_top_k: int = Field(default=12, ge=1, le=100)
+    rag_prefetch_k: int = Field(default=80, ge=1, le=200)
     rag_chunk_size: int = Field(default=800, ge=100, le=4000)
     rag_chunk_overlap: int = Field(default=120, ge=0, le=1000)
     rag_pdf_max_pages: int = Field(default=300, ge=1, le=5000)

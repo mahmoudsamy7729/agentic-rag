@@ -61,6 +61,8 @@ class OpenAILLM(LLM):
             payload["stop"] = cfg.stop
         if cfg.timeout_s is not None:
             payload["timeout"] = cfg.timeout_s
+        if cfg.response_format is not None:
+            payload["response_format"] = cfg.response_format
         if tools:
             payload["tools"] = list(tools)
 
@@ -106,6 +108,8 @@ class OpenAILLM(LLM):
             payload["stop"] = cfg.stop
         if cfg.timeout_s is not None:
             payload["timeout"] = cfg.timeout_s
+        if cfg.response_format is not None:
+            payload["response_format"] = cfg.response_format
         if tools:
             payload["tools"] = list(tools)
 

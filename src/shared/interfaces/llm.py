@@ -47,6 +47,7 @@ class GenerationConfig:
     top_p: float | None = None
     stop: list[str] | None = None
     timeout_s: float | None = None
+    response_format: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
