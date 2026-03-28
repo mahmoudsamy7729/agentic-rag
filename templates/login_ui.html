@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
+    .wrap { max-width: 520px; margin: 48px auto; padding: 0 16px; }
+    .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 18px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .sub { color: #6b7280; font-size: 13px; margin-bottom: 12px; }
+    label { display: block; margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
+    input, button { width: 100%; border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    button { cursor: pointer; background: #0f766e; border-color: #0f766e; color: #fff; margin-top: 12px; }
+    .msg { margin-top: 10px; padding: 10px; border: 1px dashed #d8dee9; border-radius: 8px; background: #fff; font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .links { margin-top: 10px; font-size: 12px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="panel">
+      <h1>Login</h1>
+      <div class="sub">Use your account email and password. JWT is stored in localStorage.</div>
+      <form id="loginForm">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" required />
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+        <button id="loginBtn" type="submit">Login</button>
+      </form>
+      <div id="msg" class="msg">Ready.</div>
+      <div class="links">
+        <a href="/ask-ui">Go to Ask UI</a> |
+        <a href="/evaluation-ui">Go to Evaluation UI</a>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/ui_auth.js"></script>
+  <script>
+    const form = document.getElementById("loginForm");
+    const emailEl = document.getElementById("email");
+    const passwordEl = document.getElementById("password");
+    const msgEl = document.getElementById("msg");
+
+    function setMsg(text) {
+      msgEl.textContent = text;
+    }
+
+    function getNextPath() {
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      return next && next.startsWith("/") ? next : "/ask-ui";
+    }
+
+    async function tryReuseToken() {
+      const token = window.uiAuth.getToken();
+      if (!token) return;
+      try {
+        await window.uiAuth.apiFetch("/users/me");
+        window.location.href = getNextPath();
+      } catch (_err) {
+        window.uiAuth.clearToken();
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const email = emailEl.value.trim();
+      const password = passwordEl.value;
+      if (!email || !password) {
+        setMsg("Email and password are required.");
+        return;
+      }
+
+      try {
+        const body = new URLSearchParams();
+        body.set("username", email);
+        body.set("password", password);
+
+        const response = await fetch("/auth/jwt/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          credentials: "same-origin",
+          body: body.toString(),
+        });
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload?.detail || "Login failed.");
+        }
+        if (!payload?.access_token) {
+          throw new Error("Login succeeded but no access token was returned.");
+        }
+
+        window.uiAuth.saveToken(payload.access_token);
+        await window.uiAuth.apiFetch("/users/me");
+        setMsg("Login successful. Redirecting...");
+        window.location.href = getNextPath();
+      } catch (err) {
+        window.uiAuth.clearToken();
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    tryReuseToken();
+  </script>
+</body>
+</html>

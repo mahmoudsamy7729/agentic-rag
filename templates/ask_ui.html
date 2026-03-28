@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ask Agent</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
+    .wrap { max-width: 1050px; margin: 0 auto; padding: 24px; }
+    .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { border: 1px solid #d8dee9; border-radius: 8px; padding: 8px 10px; font-size: 13px; text-decoration: none; background: #fff; color: #111827; cursor: pointer; }
+    h1 { margin: 0; font-size: 28px; }
+    h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
+    label { display: block; margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
+    input, select, textarea, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    textarea, input, select { width: 100%; }
+    textarea { min-height: 96px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .actions button { cursor: pointer; }
+    .primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+    .mono { font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .msg { margin-top: 8px; }
+    pre { white-space: pre-wrap; margin: 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    th, td { border-bottom: 1px solid #edf2f7; padding: 10px; text-align: left; vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; color: #6b7280; background: #f9fafb; }
+    .table-wrap { border: 1px solid #d8dee9; border-radius: 10px; overflow: hidden; }
+    @media (max-width: 860px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="panel">
+      <div class="top">
+        <h1>Ask Agent</h1>
+        <div class="nav">
+          <a href="/evaluation-ui">Evaluation</a>
+          <a href="/evaluation-history-ui">History</a>
+          <button id="logoutBtn" type="button">Logout</button>
+        </div>
+      </div>
+      <div class="mono">Single-turn ask with citations and cache visibility.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Query</h2>
+      <div class="row">
+        <div>
+          <label for="docSelect">Document</label>
+          <select id="docSelect"></select>
+          <div class="actions">
+            <button id="refreshDocsBtn" type="button">Refresh Documents</button>
+          </div>
+        </div>
+        <div>
+          <label for="docIdInput">Or Enter doc_id</label>
+          <input id="docIdInput" type="text" placeholder="Optional explicit doc_id override" />
+          <label for="useCache" style="margin-top:10px;">
+            <input id="useCache" type="checkbox" checked style="width:auto; margin-right:8px;" />
+            Use semantic cache
+          </label>
+        </div>
+      </div>
+
+      <label for="question">Question</label>
+      <textarea id="question" placeholder="Ask a question scoped to one document."></textarea>
+
+      <div class="actions">
+        <button id="askBtn" class="primary" type="button">Ask</button>
+      </div>
+      <div id="msg" class="mono msg">Ready.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Answer</h2>
+      <div class="mono" id="meta">No response yet.</div>
+      <div style="margin-top:10px;">
+        <pre id="answerText"></pre>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Citations</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>doc_id</th>
+              <th>chunk_id</th>
+              <th>page</th>
+              <th>snippet</th>
+            </tr>
+          </thead>
+          <tbody id="citationsBody">
+            <tr><td colspan="5" class="mono">No citations yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/ui_auth.js"></script>
+  <script>
+    const el = {
+      docSelect: document.getElementById("docSelect"),
+      refreshDocsBtn: document.getElementById("refreshDocsBtn"),
+      docIdInput: document.getElementById("docIdInput"),
+      useCache: document.getElementById("useCache"),
+      question: document.getElementById("question"),
+      askBtn: document.getElementById("askBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
+      msg: document.getElementById("msg"),
+      meta: document.getElementById("meta"),
+      answerText: document.getElementById("answerText"),
+      citationsBody: document.getElementById("citationsBody"),
+    };
+
+    function setMsg(text) {
+      el.msg.textContent = text;
+    }
+
+    function renderCitations(citations) {
+      if (!citations || !citations.length) {
+        el.citationsBody.innerHTML = `<tr><td colspan="5" class="mono">No citations.</td></tr>`;
+        return;
+      }
+      el.citationsBody.innerHTML = citations.map((c) => `
+        <tr>
+          <td class="mono">${c.source || "-"}</td>
+          <td class="mono">${c.doc_id || "-"}</td>
+          <td class="mono">${c.chunk_id || "-"}</td>
+          <td class="mono">${c.page_number ?? "-"}</td>
+          <td>${c.snippet || "-"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function selectedDocId() {
+      const manual = el.docIdInput.value.trim();
+      if (manual) return manual;
+      return el.docSelect.value || "";
+    }
+
+    async function loadDocuments() {
+      const payload = await window.uiAuth.apiFetch("/documents?limit=100&offset=0");
+      const items = payload.items || [];
+      if (!items.length) {
+        el.docSelect.innerHTML = `<option value="">No documents found</option>`;
+        return;
+      }
+      el.docSelect.innerHTML = items.map((item) => {
+        const source = item.source || "unknown-source";
+        return `<option value="${item.doc_id}">${item.doc_id} | ${source}</option>`;
+      }).join("");
+    }
+
+    async function askAgent() {
+      const docId = selectedDocId();
+      const question = el.question.value.trim();
+      if (!docId) {
+        setMsg("doc_id is required (select one or enter manually).");
+        return;
+      }
+      if (!question) {
+        setMsg("Question is required.");
+        return;
+      }
+
+      const useCache = el.useCache.checked;
+      const endpoint = `/agent/ask?use_cache=${useCache ? "true" : "false"}`;
+      const payload = await window.uiAuth.apiFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: question,
+          doc_id: docId,
+        }),
+      });
+
+      el.meta.textContent = `status=${payload.status} | cache=${payload.cache_status} | refined_query="${payload.refined_query}" | steps=${payload.steps} | tools=[${(payload.tools_used || []).join(", ")}]`;
+      el.answerText.textContent = payload.answer || "";
+      renderCitations(payload.citations || []);
+      setMsg("Done.");
+    }
+
+    document.getElementById("refreshDocsBtn").addEventListener("click", async () => {
+      try {
+        await loadDocuments();
+        setMsg("Documents loaded.");
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    document.getElementById("askBtn").addEventListener("click", async () => {
+      try {
+        await askAgent();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+      window.uiAuth.logout();
+    });
+
+    (async function init() {
+      window.uiAuth.requireAuthOrRedirect();
+      try {
+        await loadDocuments();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    })();
+  </script>
+</body>
+</html>

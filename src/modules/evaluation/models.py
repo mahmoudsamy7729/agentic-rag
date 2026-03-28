@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database import Base
+
+JSON_PAYLOAD_TYPE = JSON().with_variant(JSONB, "postgresql")
 
 
 class EvaluationRun(Base):
@@ -73,18 +75,22 @@ class EvaluationCase(Base):
     case_index: Mapped[int] = mapped_column(Integer, nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     reference_answer: Mapped[str] = mapped_column(Text, nullable=False)
-    expected_chunk_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    expected_chunk_ids: Mapped[list[str]] = mapped_column(
+        JSON_PAYLOAD_TYPE, nullable=False, default=list
+    )
     difficulty: Mapped[str | None] = mapped_column(String(64), nullable=True)
     category: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    retrieved_chunk_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    retrieved_chunk_ids: Mapped[list[str]] = mapped_column(
+        JSON_PAYLOAD_TYPE, nullable=False, default=list
+    )
     hit: Mapped[bool | None] = mapped_column(nullable=True)
     recall: Mapped[float | None] = mapped_column(Float, nullable=True)
     first_relevant_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reciprocal_rank: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     generated_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
-    citations: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    citations: Mapped[list[dict]] = mapped_column(JSON_PAYLOAD_TYPE, nullable=False, default=list)
     accuracy: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completeness: Mapped[int | None] = mapped_column(Integer, nullable=True)
     relevance: Mapped[int | None] = mapped_column(Integer, nullable=True)

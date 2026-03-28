@@ -57,3 +57,4 @@ active_user = fastapi_users.current_user(active=True)
 
 CurrentUserDep = Annotated[User, Depends(current_user)]
 ActiveUserDep = Annotated[User, Depends(active_user)]
+UserManagerDep = Annotated[UserManager, Depends(get_user_manager)]
