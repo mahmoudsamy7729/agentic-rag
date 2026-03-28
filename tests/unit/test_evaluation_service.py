@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+from src.modules.evaluation.config import EvaluationRunConfig
 from src.modules.evaluation.service import EvaluationService
 
 
@@ -19,13 +20,30 @@ class _NoopJudge:
     pass
 
 
+class _NoopAskPipeline:
+    pass
+
+
 def _build_service(max_cases: int = 500) -> EvaluationService:
     return EvaluationService(
         repository=_NoopRepository(),  # type: ignore[arg-type]
         retrieval_service=_NoopRetrieval(),  # type: ignore[arg-type]
         agent_service=_NoopAgent(),  # type: ignore[arg-type]
+        ask_pipeline=_NoopAskPipeline(),  # type: ignore[arg-type]
         judge_service=_NoopJudge(),  # type: ignore[arg-type]
         max_cases=max_cases,
+        run_config=EvaluationRunConfig(
+            rag_top_k=4,
+            rag_prefetch_k=50,
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+            reranker_enabled=False,
+            reranker_model=None,
+            answer_model="gpt-oss:120b-cloud",
+            chunk_strategy="fixed_window",
+            chunk_size=800,
+            chunk_overlap=120,
+        ),
     )
 
 

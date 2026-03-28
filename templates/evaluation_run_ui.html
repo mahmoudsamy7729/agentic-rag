@@ -3,65 +3,54 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RAG Evaluation</title>
+  <title>Evaluation Run</title>
   <style>
     body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
-    .wrap { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
     .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
     h1 { margin: 0 0 8px; font-size: 28px; }
     h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
-    label { display: block; margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
-    input, textarea, button { width: 100%; box-sizing: border-box; border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; }
-    textarea { min-height: 90px; resize: vertical; }
-    .row { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+    label { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
+    input, textarea, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    textarea, input { width: 100%; }
+    textarea { min-height: 80px; resize: vertical; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-    .actions button { width: auto; }
+    button { cursor: pointer; }
     .primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    th, td { border-bottom: 1px solid #edf2f7; padding: 10px; text-align: left; vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; color: #6b7280; background: #f9fafb; }
+    .table-wrap { border: 1px solid #d8dee9; border-radius: 10px; overflow: hidden; }
     .mono { font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
-    .msg { margin-top: 10px; padding: 10px; border: 1px dashed #d8dee9; border-radius: 8px; background: #fff; }
     .metrics { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(120px, 1fr)); }
     .metric { border: 1px solid #d8dee9; border-radius: 10px; padding: 10px; background: #fff; }
     .metric .k { font-size: 11px; color: #6b7280; text-transform: uppercase; }
     .metric .v { margin-top: 6px; font-family: Consolas, "Cascadia Code", monospace; font-size: 16px; }
-    @media (max-width: 860px) { .row { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
+    @media (max-width: 860px) { .metrics { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
   </style>
 </head>
 <body>
   <main class="wrap">
     <div class="panel">
-      <h1>RAG Evaluation Console</h1>
-      <div class="mono">Start evaluations and track basic status. Use History page for compare and Run page for case reruns.</div>
+      <h1>Evaluation Run</h1>
+      <div id="runMeta" class="mono">run={{ run_id }}</div>
     </div>
 
     <div class="panel">
-      <h2>Run Setup</h2>
+      <h2>Access</h2>
       <label for="jwtToken">JWT Token</label>
       <textarea id="jwtToken" placeholder="Paste Bearer token"></textarea>
-
-      <div class="row">
-        <div>
-          <label for="docId">Document ID</label>
-          <input id="docId" type="text" placeholder="doc-..." />
-        </div>
-        <div>
-          <label for="datasetFile">Dataset (.jsonl)</label>
-          <input id="datasetFile" type="file" accept=".jsonl,application/json,text/plain" />
-        </div>
-      </div>
-
       <div class="actions">
-        <button id="startBtn" class="primary" type="button">Start Evaluation</button>
-        <button id="refreshBtn" type="button">Refresh Status</button>
+        <button id="refreshBtn" class="primary" type="button">Refresh Run</button>
+        <button id="rerunBtn" type="button">Rerun Failed Cases</button>
         <button id="openHistoryBtn" type="button">Open History Page</button>
-        <button id="openRunBtn" type="button">Open Run Page</button>
       </div>
-      <div id="msg" class="msg mono">Ready.</div>
+      <div id="msg" class="mono" style="margin-top:8px;">Ready.</div>
     </div>
 
     <div class="panel">
-      <h2>Live Status</h2>
-      <div id="runMeta" class="mono">No run selected.</div>
-      <div class="metrics" style="margin-top:10px;">
+      <h2>Run Metrics</h2>
+      <div class="metrics">
         <div class="metric"><div class="k">Processed</div><div class="v" id="mProcessed">-</div></div>
         <div class="metric"><div class="k">Hit@k</div><div class="v" id="mHit">-</div></div>
         <div class="metric"><div class="k">Recall@k</div><div class="v" id="mRecall">-</div></div>
@@ -72,20 +61,39 @@
         <div class="metric"><div class="k">Groundedness</div><div class="v" id="mGround">-</div></div>
       </div>
     </div>
+
+    <div class="panel">
+      <h2>Cases</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Status</th>
+              <th>Question</th>
+              <th>Retrieval</th>
+              <th>Judge</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="casesBody">
+            <tr><td colspan="6" class="mono">No cases loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </main>
 
   <script>
     const pollIntervalMs = Number({{ poll_interval_ms | tojson }});
-    const state = { runId: null, timer: null };
+    const runId = {{ run_id | tojson }};
+    const state = { timer: null };
 
     const el = {
       token: document.getElementById("jwtToken"),
-      docId: document.getElementById("docId"),
-      file: document.getElementById("datasetFile"),
-      startBtn: document.getElementById("startBtn"),
       refreshBtn: document.getElementById("refreshBtn"),
+      rerunBtn: document.getElementById("rerunBtn"),
       openHistoryBtn: document.getElementById("openHistoryBtn"),
-      openRunBtn: document.getElementById("openRunBtn"),
       msg: document.getElementById("msg"),
       runMeta: document.getElementById("runMeta"),
       mProcessed: document.getElementById("mProcessed"),
@@ -96,16 +104,15 @@
       mComp: document.getElementById("mComp"),
       mRel: document.getElementById("mRel"),
       mGround: document.getElementById("mGround"),
+      casesBody: document.getElementById("casesBody"),
     };
+
+    function setMsg(text) { el.msg.textContent = text; }
 
     function fmt(value, digits = 3) {
       if (value === null || value === undefined) return "-";
       if (typeof value !== "number") return String(value);
       return value.toFixed(digits);
-    }
-
-    function setMsg(text) {
-      el.msg.textContent = text;
     }
 
     function authHeaders(extra = {}) {
@@ -117,9 +124,7 @@
     async function fetchJson(url, options = {}) {
       const response = await fetch(url, options);
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body?.detail || response.statusText);
-      }
+      if (!response.ok) throw new Error(body?.detail || response.statusText);
       return body;
     }
 
@@ -135,6 +140,25 @@
       el.mGround.textContent = fmt(run.groundedness_avg, 2);
     }
 
+    function renderCases(items) {
+      if (!items.length) {
+        el.casesBody.innerHTML = `<tr><td colspan="6" class="mono">No cases loaded.</td></tr>`;
+        return;
+      }
+      el.casesBody.innerHTML = items.map((item) => {
+        const retrieval = `hit=${item.hit ?? "-"} | recall=${fmt(item.recall)} | rr=${fmt(item.reciprocal_rank)}`;
+        const judge = `${item.accuracy ?? "-"}/${item.completeness ?? "-"}/${item.relevance ?? "-"}/${item.groundedness ?? "-"}`;
+        return `<tr>
+          <td class="mono">${item.case_index}</td>
+          <td class="mono">${item.case_status}</td>
+          <td>${item.question}</td>
+          <td class="mono">${retrieval}</td>
+          <td class="mono">${judge}</td>
+          <td class="mono">${item.error_message ?? "-"}</td>
+        </tr>`;
+      }).join("");
+    }
+
     function stopPolling() {
       if (state.timer) {
         clearInterval(state.timer);
@@ -142,52 +166,43 @@
       }
     }
 
-    async function refreshRun() {
-      if (!state.runId) return;
-      const run = await fetchJson(`/evaluations/${state.runId}`, { headers: authHeaders() });
+    async function refreshAll() {
+      const run = await fetchJson(`/evaluations/${runId}`, { headers: authHeaders() });
+      const caseLimit = Math.max(1, Number(run.total_cases || 1));
+      const cases = await fetchJson(`/evaluations/${runId}/cases?limit=${caseLimit}&offset=0`, { headers: authHeaders() });
       renderRun(run);
+      renderCases(cases.items || []);
       if (run.run_status === "completed" || run.run_status === "failed") {
         stopPolling();
       }
+      return run;
     }
 
     function startPolling() {
       stopPolling();
       state.timer = setInterval(() => {
-        refreshRun().catch((err) => setMsg(String(err)));
+        refreshAll().catch((err) => setMsg(String(err)));
       }, pollIntervalMs);
     }
 
-    el.startBtn.addEventListener("click", async () => {
+    el.refreshBtn.addEventListener("click", async () => {
       try {
-        const docId = el.docId.value.trim();
-        const file = el.file.files && el.file.files[0];
-        if (!docId) throw new Error("doc_id is required.");
-        if (!file) throw new Error("JSONL file is required.");
-
-        const form = new FormData();
-        form.append("doc_id", docId);
-        form.append("file", file);
-
-        const result = await fetchJson("/evaluations/rag", {
-          method: "POST",
-          headers: authHeaders(),
-          body: form,
-        });
-
-        state.runId = result.run_id;
-        setMsg(`Run queued: ${result.run_id}`);
-        await refreshRun();
-        startPolling();
+        const run = await refreshAll();
+        setMsg(`Refreshed. status=${run.run_status}`);
       } catch (err) {
         setMsg(String(err?.message || err));
       }
     });
 
-    el.refreshBtn.addEventListener("click", async () => {
+    el.rerunBtn.addEventListener("click", async () => {
       try {
-        await refreshRun();
-        setMsg("Status refreshed.");
+        const result = await fetchJson(`/evaluations/${runId}/rerun-failed`, {
+          method: "POST",
+          headers: authHeaders(),
+        });
+        setMsg(`Rerun queued for ${result.queued_failed_cases} failed case(s).`);
+        await refreshAll();
+        startPolling();
       } catch (err) {
         setMsg(String(err?.message || err));
       }
@@ -195,14 +210,6 @@
 
     el.openHistoryBtn.addEventListener("click", () => {
       window.location.href = "/evaluation-history-ui";
-    });
-
-    el.openRunBtn.addEventListener("click", () => {
-      if (!state.runId) {
-        setMsg("Start or select a run first.");
-        return;
-      }
-      window.location.href = `/evaluation-runs/${state.runId}/ui`;
     });
   </script>
 </body>

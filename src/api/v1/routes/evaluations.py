@@ -7,10 +7,17 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from src.api.v1.dependencies import EvaluationJobRunnerDep, EvaluationServiceDep
+from src.api.v1.dependencies import (
+    EvaluationJobRunnerDep,
+    EvaluationRerunFailedJobRunnerDep,
+    EvaluationServiceDep,
+)
 from src.api.v1.schemas import (
     EvaluationCaseItem,
     EvaluationCaseListResponse,
+    EvaluationRerunFailedResponse,
+    EvaluationRunConfig,
+    EvaluationRunListResponse,
     EvaluationReportResponse,
     EvaluationRunCreateResponse,
     EvaluationRunStatusResponse,
@@ -30,6 +37,29 @@ async def evaluation_ui(request: Request):
         "evaluation_ui.html",
         {
             "request": request,
+            "poll_interval_ms": settings.eval_poll_interval_ms,
+        },
+    )
+
+
+@router.get("/evaluation-history-ui", response_class=HTMLResponse, include_in_schema=False)
+async def evaluation_history_ui(request: Request):
+    return templates.TemplateResponse(
+        "evaluation_history_ui.html",
+        {
+            "request": request,
+            "poll_interval_ms": settings.eval_poll_interval_ms,
+        },
+    )
+
+
+@router.get("/evaluation-runs/{run_id}/ui", response_class=HTMLResponse, include_in_schema=False)
+async def evaluation_run_ui(request: Request, run_id: UUID):
+    return templates.TemplateResponse(
+        "evaluation_run_ui.html",
+        {
+            "request": request,
+            "run_id": str(run_id),
             "poll_interval_ms": settings.eval_poll_interval_ms,
         },
     )
@@ -81,6 +111,62 @@ async def create_rag_evaluation_run(
     )
 
 
+@router.post(
+    "/evaluations/{run_id}/rerun-failed",
+    response_model=EvaluationRerunFailedResponse,
+    status_code=202,
+)
+async def rerun_failed_evaluation_cases(
+    run_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: ActiveUserDep,
+    evaluation_service: EvaluationServiceDep,
+    evaluation_rerun_failed_job_runner: EvaluationRerunFailedJobRunnerDep,
+):
+    payload = await evaluation_service.get_owned_run_failed_count(
+        owner_user_id=current_user.id,
+        run_id=run_id,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Evaluation run not found.")
+
+    run, failed_count = payload
+    if run.status == "running":
+        raise HTTPException(status_code=409, detail="Cannot rerun while evaluation is running.")
+
+    if failed_count > 0:
+        background_tasks.add_task(evaluation_rerun_failed_job_runner, run.id)
+
+    return EvaluationRerunFailedResponse(
+        status="accepted",
+        run_id=run.id,
+        queued_failed_cases=failed_count,
+    )
+
+
+@router.get("/evaluations", response_model=EvaluationRunListResponse)
+async def list_rag_evaluation_runs(
+    current_user: ActiveUserDep,
+    evaluation_service: EvaluationServiceDep,
+    doc_id: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    runs, total = await evaluation_service.list_runs(
+        owner_user_id=current_user.id,
+        doc_id=doc_id,
+        limit=limit,
+        offset=offset,
+    )
+    return EvaluationRunListResponse(
+        status="ok",
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=[_to_run_status_response(run) for run in runs],
+    )
+
+
 @router.get("/evaluations/{run_id}", response_model=EvaluationRunStatusResponse)
 async def get_rag_evaluation_run(run_id: UUID, current_user: ActiveUserDep, evaluation_service: EvaluationServiceDep):
     run = await evaluation_service.get_run_status(owner_user_id=current_user.id, run_id=run_id)
@@ -94,7 +180,7 @@ async def get_rag_evaluation_cases(
     run_id: UUID,
     current_user: ActiveUserDep,
     evaluation_service: EvaluationServiceDep,
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=20, ge=1, le=settings.eval_max_cases),
     offset: int = Query(default=0, ge=0),
 ):
     payload = await evaluation_service.list_run_cases(
@@ -152,6 +238,18 @@ def _to_run_status_response(run: EvaluationRun) -> EvaluationRunStatusResponse:
         relevance_avg=run.relevance_avg,
         groundedness_avg=run.groundedness_avg,
         error_message=run.error_message,
+        config=EvaluationRunConfig(
+            rag_top_k=run.cfg_rag_top_k,
+            rag_prefetch_k=run.cfg_rag_prefetch_k,
+            embedding_provider=run.cfg_embedding_provider,
+            embedding_model=run.cfg_embedding_model,
+            reranker_enabled=run.cfg_reranker_enabled,
+            reranker_model=run.cfg_reranker_model,
+            answer_model=run.cfg_answer_model,
+            chunk_strategy=run.cfg_chunk_strategy,
+            chunk_size=run.cfg_chunk_size,
+            chunk_overlap=run.cfg_chunk_overlap,
+        ),
         created_at=run.created_at,
         started_at=run.started_at,
         finished_at=run.finished_at,

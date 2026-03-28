@@ -1,15 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
-from src.agents.cache_policy import is_cacheable_rag_answer, is_no_answer_fallback
+from src.agents import DocumentNotFoundError
 from src.api.v1.dependencies import (
-    AgentServiceDep,
-    EmbeddingProviderDep,
-    LLMDep,
-    QueryRefinementServiceDep,
-    SemanticCacheServiceDep,
+    AgentAskPipelineDep,
 )
 from src.api.v1.schemas import AgentAskRequest, AgentAskResponse
-from src.modules.documents import DocumentsRepositoryDep
 from src.modules.users.dependencies import ActiveUserDep
 
 router = APIRouter()
@@ -18,104 +13,27 @@ router = APIRouter()
 @router.post("/agent/ask", response_model=AgentAskResponse)
 async def agent_ask(
     payload: AgentAskRequest,
-    agent_service: AgentServiceDep,
-    llm: LLMDep,
-    query_refinement_service: QueryRefinementServiceDep,
-    embedding_provider: EmbeddingProviderDep,
-    semantic_cache_service: SemanticCacheServiceDep,
-    repository: DocumentsRepositoryDep,
+    ask_pipeline: AgentAskPipelineDep,
     current_user: ActiveUserDep,
+    use_cache: bool = Query(default=True),
 ):
-    document = await repository.get_owned_document(
-        owner_user_id=current_user.id,
-        doc_id=payload.doc_id,
-        include_deleted=False,
-    )
-    if document is None:
-        raise HTTPException(status_code=404, detail="Document not found.")
-
-    refinement = await query_refinement_service.refine(
-        question=payload.question,
-        doc_id=payload.doc_id,
-    )
-    refined_query = refinement.refined_query
-    normalized_question = semantic_cache_service.normalize_question(refined_query)
-    query_embedding: list[float] | None = None
-    if semantic_cache_service.enabled and document.last_indexed_at is not None:
-        try:
-            query_embedding = await embedding_provider.embed_query(normalized_question)
-            cache_hit = await semantic_cache_service.lookup(
-                owner_user_id=current_user.id,
-                doc_id=payload.doc_id,
-                doc_version=document.last_indexed_at,
-                model_name=llm.model_name,
-                query_embedding=query_embedding,
-            )
-            if cache_hit is not None:
-                return AgentAskResponse(
-                    status="ok",
-                    cache_status="hit",
-                    refined_query=refined_query,
-                    answer=cache_hit.answer,
-                    steps=0,
-                    tools_used=[],
-                    citations=cache_hit.citations,
-                )
-        except Exception:
-            # Cache failures should not block generation.
-            pass
-
-    result = await agent_service.run(
-        question=refined_query,
-        doc_id=payload.doc_id,
-        session_id=payload.session_id,
-        user_id=str(current_user.id),
-    )
-
-    citations = [
-        {
-            "source": citation.source,
-            "doc_id": citation.doc_id,
-            "chunk_id": citation.chunk_id,
-            "snippet": citation.snippet,
-            "page_number": citation.page_number,
-        }
-        for citation in result.citations
-    ]
-    is_rag_backed = is_cacheable_rag_answer(
-        tools_used=result.tools_used,
-        citations=citations,
-    )
-    should_skip_cache = is_no_answer_fallback(result.answer)
-    if (
-        semantic_cache_service.enabled
-        and document.last_indexed_at is not None
-        and is_rag_backed
-        and not should_skip_cache
-    ):
-        try:
-            if query_embedding is None:
-                query_embedding = await embedding_provider.embed_query(normalized_question)
-            await semantic_cache_service.store(
-                owner_user_id=current_user.id,
-                doc_id=payload.doc_id,
-                doc_version=document.last_indexed_at,
-                model_name=llm.model_name,
-                question_normalized=normalized_question,
-                question_embedding=query_embedding,
-                answer=result.answer,
-                citations=citations,
-            )
-        except Exception:
-            # Cache write failures should not block generation.
-            pass
+    try:
+        result = await ask_pipeline.ask(
+            owner_user_id=current_user.id,
+            question=payload.question,
+            doc_id=payload.doc_id,
+            session_id=payload.session_id,
+            use_cache=use_cache,
+        )
+    except DocumentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return AgentAskResponse(
         status=result.status,
-        cache_status="miss",
-        refined_query=refined_query,
+        cache_status=result.cache_status,  # type: ignore[arg-type]
+        refined_query=result.refined_query,
         answer=result.answer,
         steps=result.steps,
         tools_used=result.tools_used,
-        citations=citations,
+        citations=result.citations,
     )
