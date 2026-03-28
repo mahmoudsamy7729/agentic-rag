@@ -15,7 +15,7 @@ class RAGSettings(BaseSettings):
     rag_pdf_max_pages: int = Field(default=300, ge=1, le=5000)
     rag_pdf_max_mb: int = Field(default=25, ge=1, le=500)
     rag_pdf_dedupe_threshold: int = Field(default=96, ge=0, le=100)
-    reranker_enabled: bool = Field(default=False)
+    reranker_enabled: bool = Field(default=True)
     reranker_model: str = Field(default="rerank-v4.0-fast")
     reranker_api_key: str | None = Field(default=None)
     embedding_provider: Literal["openai", "huggingface"] = Field(default="huggingface")

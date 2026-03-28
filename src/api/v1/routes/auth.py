@@ -7,12 +7,11 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.exceptions import UserNotExists
 
-from src.modules.users.dependencies import UserManagerDep, fastapi_users
+from src.modules.users.dependencies import UserManagerDep, fastapi_users, get_jwt_strategy
 from src.modules.users.schemas import TokenResponse, UserCreate, UserRead
 from src.modules.users.security.jwt import (
     TokenExpiredError,
     TokenValidationError,
-    generate_access_token,
     generate_refresh_token,
     verify_refresh_token,
 )
@@ -78,9 +77,7 @@ async def login(
         _clear_auth_cookies(response)
         return response
 
-    access_token, _, _ = generate_access_token(
-        _build_token_payload(user_id=user.id, email=user.email, token_type="access")
-    )
+    access_token = await get_jwt_strategy().write_token(user)
     refresh_token, _, _ = generate_refresh_token(
         _build_token_payload(user_id=user.id, email=user.email, token_type="refresh")
     )
@@ -134,9 +131,7 @@ async def refresh_access_token(
         _clear_auth_cookies(response)
         return response
 
-    access_token, _, _ = generate_access_token(
-        _build_token_payload(user_id=user.id, email=user.email, token_type="access")
-    )
+    access_token = await get_jwt_strategy().write_token(user)
     # Stateless rotation: issue a new refresh token every refresh.
     refresh_token, _, _ = generate_refresh_token(
         _build_token_payload(user_id=user.id, email=user.email, token_type="refresh")
