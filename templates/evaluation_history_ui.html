@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -8,12 +8,14 @@
     body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
     .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { border: 1px solid #d8dee9; border-radius: 8px; padding: 8px 10px; font-size: 13px; text-decoration: none; background: #fff; color: #111827; cursor: pointer; }
     h1 { margin: 0 0 8px; font-size: 28px; }
     h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
     label { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
-    input, textarea, select, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
-    textarea, input, select { width: 100%; }
-    textarea { min-height: 80px; resize: vertical; }
+    input, select, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    input, select { width: 100%; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
     button { cursor: pointer; }
     .primary { background: #0f766e; border-color: #0f766e; color: #fff; }
@@ -30,14 +32,21 @@
 <body>
   <main class="wrap">
     <div class="panel">
-      <h1>Evaluation History</h1>
-      <div class="mono">History + run comparison. Open run details to inspect cases and rerun failures.</div>
+      <div class="top">
+        <div>
+          <h1>Evaluation History</h1>
+          <div class="mono">History + run comparison. Open run details to inspect cases and rerun failures.</div>
+        </div>
+        <div class="nav">
+          <a href="/ask-ui">Ask</a>
+          <a href="/evaluation-ui">Evaluation</a>
+          <button id="logoutBtn" type="button">Logout</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
       <h2>Query</h2>
-      <label for="jwtToken">JWT Token</label>
-      <textarea id="jwtToken" placeholder="Paste Bearer token"></textarea>
       <div class="row" style="margin-top:10px;">
         <div>
           <label for="docFilter">Document Filter (optional)</label>
@@ -91,14 +100,15 @@
     </div>
   </main>
 
+  <script src="/static/js/ui_auth.js"></script>
   <script>
     const state = { runs: [] };
 
     const el = {
-      token: document.getElementById("jwtToken"),
       docFilter: document.getElementById("docFilter"),
       loadBtn: document.getElementById("loadBtn"),
       openEvalBtn: document.getElementById("openEvalBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
       msg: document.getElementById("msg"),
       historyBody: document.getElementById("historyBody"),
       runA: document.getElementById("runA"),
@@ -113,19 +123,6 @@
       if (value === null || value === undefined) return "-";
       if (typeof value !== "number") return String(value);
       return value.toFixed(digits);
-    }
-
-    function authHeaders(extra = {}) {
-      const token = el.token.value.trim();
-      if (!token) return extra;
-      return { ...extra, Authorization: `Bearer ${token}` };
-    }
-
-    async function fetchJson(url, options = {}) {
-      const response = await fetch(url, options);
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.detail || response.statusText);
-      return body;
     }
 
     function runLabel(run) {
@@ -197,7 +194,7 @@ chunk_overlap: A=${a.chunk_overlap ?? "-"} | B=${b.chunk_overlap ?? "-"}`;
       const qs = new URLSearchParams({ limit: "100", offset: "0" });
       const doc = el.docFilter.value.trim();
       if (doc) qs.set("doc_id", doc);
-      const payload = await fetchJson(`/evaluations?${qs.toString()}`, { headers: authHeaders() });
+      const payload = await window.uiAuth.apiFetch(`/evaluations?${qs.toString()}`);
       renderHistory(payload.items || []);
       setMsg(`Loaded ${payload.total} run(s).`);
     }
@@ -211,6 +208,12 @@ chunk_overlap: A=${a.chunk_overlap ?? "-"} | B=${b.chunk_overlap ?? "-"}`;
     el.openEvalBtn.addEventListener("click", () => {
       window.location.href = "/evaluation-ui";
     });
+
+    el.logoutBtn.addEventListener("click", () => {
+      window.uiAuth.logout();
+    });
+
+    window.uiAuth.requireAuthOrRedirect();
   </script>
 </body>
 </html>

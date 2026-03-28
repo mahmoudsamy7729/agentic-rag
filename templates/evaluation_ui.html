@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -8,11 +8,13 @@
     body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
     .wrap { max-width: 980px; margin: 0 auto; padding: 24px; }
     .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { border: 1px solid #d8dee9; border-radius: 8px; padding: 8px 10px; font-size: 13px; text-decoration: none; background: #fff; color: #111827; cursor: pointer; }
     h1 { margin: 0 0 8px; font-size: 28px; }
     h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
     label { display: block; margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
     input, textarea, button { width: 100%; box-sizing: border-box; border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; }
-    textarea { min-height: 90px; resize: vertical; }
     .row { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
     .actions button { width: auto; }
@@ -29,15 +31,21 @@
 <body>
   <main class="wrap">
     <div class="panel">
-      <h1>RAG Evaluation Console</h1>
-      <div class="mono">Start evaluations and track basic status. Use History page for compare and Run page for case reruns.</div>
+      <div class="top">
+        <div>
+          <h1>RAG Evaluation Console</h1>
+          <div class="mono">Start evaluations and track basic status.</div>
+        </div>
+        <div class="nav">
+          <a href="/ask-ui">Ask</a>
+          <a href="/evaluation-history-ui">History</a>
+          <button id="logoutBtn" type="button">Logout</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
       <h2>Run Setup</h2>
-      <label for="jwtToken">JWT Token</label>
-      <textarea id="jwtToken" placeholder="Paste Bearer token"></textarea>
-
       <div class="row">
         <div>
           <label for="docId">Document ID</label>
@@ -74,18 +82,19 @@
     </div>
   </main>
 
+  <script src="/static/js/ui_auth.js"></script>
   <script>
     const pollIntervalMs = Number({{ poll_interval_ms | tojson }});
     const state = { runId: null, timer: null };
 
     const el = {
-      token: document.getElementById("jwtToken"),
       docId: document.getElementById("docId"),
       file: document.getElementById("datasetFile"),
       startBtn: document.getElementById("startBtn"),
       refreshBtn: document.getElementById("refreshBtn"),
       openHistoryBtn: document.getElementById("openHistoryBtn"),
       openRunBtn: document.getElementById("openRunBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
       msg: document.getElementById("msg"),
       runMeta: document.getElementById("runMeta"),
       mProcessed: document.getElementById("mProcessed"),
@@ -106,21 +115,6 @@
 
     function setMsg(text) {
       el.msg.textContent = text;
-    }
-
-    function authHeaders(extra = {}) {
-      const token = el.token.value.trim();
-      if (!token) return extra;
-      return { ...extra, Authorization: `Bearer ${token}` };
-    }
-
-    async function fetchJson(url, options = {}) {
-      const response = await fetch(url, options);
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body?.detail || response.statusText);
-      }
-      return body;
     }
 
     function renderRun(run) {
@@ -144,7 +138,7 @@
 
     async function refreshRun() {
       if (!state.runId) return;
-      const run = await fetchJson(`/evaluations/${state.runId}`, { headers: authHeaders() });
+      const run = await window.uiAuth.apiFetch(`/evaluations/${state.runId}`);
       renderRun(run);
       if (run.run_status === "completed" || run.run_status === "failed") {
         stopPolling();
@@ -169,9 +163,8 @@
         form.append("doc_id", docId);
         form.append("file", file);
 
-        const result = await fetchJson("/evaluations/rag", {
+        const result = await window.uiAuth.apiFetch("/evaluations/rag", {
           method: "POST",
-          headers: authHeaders(),
           body: form,
         });
 
@@ -204,6 +197,12 @@
       }
       window.location.href = `/evaluation-runs/${state.runId}/ui`;
     });
+
+    el.logoutBtn.addEventListener("click", () => {
+      window.uiAuth.logout();
+    });
+
+    window.uiAuth.requireAuthOrRedirect();
   </script>
 </body>
 </html>

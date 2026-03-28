@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -8,14 +8,13 @@
     body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
     .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { border: 1px solid #d8dee9; border-radius: 8px; padding: 8px 10px; font-size: 13px; text-decoration: none; background: #fff; color: #111827; cursor: pointer; }
     h1 { margin: 0 0 8px; font-size: 28px; }
     h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
-    label { display: block; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
-    input, textarea, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
-    textarea, input { width: 100%; }
-    textarea { min-height: 80px; resize: vertical; }
+    button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; cursor: pointer; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-    button { cursor: pointer; }
     .primary { background: #0f766e; border-color: #0f766e; color: #fff; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
     th, td { border-bottom: 1px solid #edf2f7; padding: 10px; text-align: left; vertical-align: top; }
@@ -32,18 +31,25 @@
 <body>
   <main class="wrap">
     <div class="panel">
-      <h1>Evaluation Run</h1>
-      <div id="runMeta" class="mono">run={{ run_id }}</div>
+      <div class="top">
+        <div>
+          <h1>Evaluation Run</h1>
+          <div id="runMeta" class="mono">run={{ run_id }}</div>
+        </div>
+        <div class="nav">
+          <a href="/ask-ui">Ask</a>
+          <a href="/evaluation-ui">Evaluation</a>
+          <a href="/evaluation-history-ui">History</a>
+          <button id="logoutBtn" type="button">Logout</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
-      <h2>Access</h2>
-      <label for="jwtToken">JWT Token</label>
-      <textarea id="jwtToken" placeholder="Paste Bearer token"></textarea>
+      <h2>Actions</h2>
       <div class="actions">
         <button id="refreshBtn" class="primary" type="button">Refresh Run</button>
         <button id="rerunBtn" type="button">Rerun Failed Cases</button>
-        <button id="openHistoryBtn" type="button">Open History Page</button>
       </div>
       <div id="msg" class="mono" style="margin-top:8px;">Ready.</div>
     </div>
@@ -84,16 +90,16 @@
     </div>
   </main>
 
+  <script src="/static/js/ui_auth.js"></script>
   <script>
     const pollIntervalMs = Number({{ poll_interval_ms | tojson }});
     const runId = {{ run_id | tojson }};
     const state = { timer: null };
 
     const el = {
-      token: document.getElementById("jwtToken"),
       refreshBtn: document.getElementById("refreshBtn"),
       rerunBtn: document.getElementById("rerunBtn"),
-      openHistoryBtn: document.getElementById("openHistoryBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
       msg: document.getElementById("msg"),
       runMeta: document.getElementById("runMeta"),
       mProcessed: document.getElementById("mProcessed"),
@@ -113,19 +119,6 @@
       if (value === null || value === undefined) return "-";
       if (typeof value !== "number") return String(value);
       return value.toFixed(digits);
-    }
-
-    function authHeaders(extra = {}) {
-      const token = el.token.value.trim();
-      if (!token) return extra;
-      return { ...extra, Authorization: `Bearer ${token}` };
-    }
-
-    async function fetchJson(url, options = {}) {
-      const response = await fetch(url, options);
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.detail || response.statusText);
-      return body;
     }
 
     function renderRun(run) {
@@ -167,9 +160,9 @@
     }
 
     async function refreshAll() {
-      const run = await fetchJson(`/evaluations/${runId}`, { headers: authHeaders() });
+      const run = await window.uiAuth.apiFetch(`/evaluations/${runId}`);
       const caseLimit = Math.max(1, Number(run.total_cases || 1));
-      const cases = await fetchJson(`/evaluations/${runId}/cases?limit=${caseLimit}&offset=0`, { headers: authHeaders() });
+      const cases = await window.uiAuth.apiFetch(`/evaluations/${runId}/cases?limit=${caseLimit}&offset=0`);
       renderRun(run);
       renderCases(cases.items || []);
       if (run.run_status === "completed" || run.run_status === "failed") {
@@ -196,9 +189,8 @@
 
     el.rerunBtn.addEventListener("click", async () => {
       try {
-        const result = await fetchJson(`/evaluations/${runId}/rerun-failed`, {
+        const result = await window.uiAuth.apiFetch(`/evaluations/${runId}/rerun-failed`, {
           method: "POST",
-          headers: authHeaders(),
         });
         setMsg(`Rerun queued for ${result.queued_failed_cases} failed case(s).`);
         await refreshAll();
@@ -208,9 +200,11 @@
       }
     });
 
-    el.openHistoryBtn.addEventListener("click", () => {
-      window.location.href = "/evaluation-history-ui";
+    el.logoutBtn.addEventListener("click", () => {
+      window.uiAuth.logout();
     });
+
+    window.uiAuth.requireAuthOrRedirect();
   </script>
 </body>
 </html>

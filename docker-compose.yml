@@ -34,13 +34,15 @@ services:
     volumes:
       - ./src:/app/src
       - ./templates:/app/templates
+      - ./static:/app/static
       - ./main.py:/app/main.py
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./data:/app/data
+      - ./tests:/app/tests
     command: >
       sh -c "uv run alembic upgrade head &&
-             uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src --reload-dir /app/templates --reload-dir /app"
+             uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src --reload-dir /app/templates --reload-dir /app/static --reload-dir /app"
 
   pgadmin:
     image: dpage/pgadmin4:8

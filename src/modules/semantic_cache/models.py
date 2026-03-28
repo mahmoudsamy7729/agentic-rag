@@ -4,11 +4,14 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, Uuid, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database import Base
+
+JSON_PAYLOAD_TYPE = JSON().with_variant(JSONB, "postgresql")
+VECTOR_PAYLOAD_TYPE = Vector().with_variant(JSON, "sqlite")
 
 
 class SemanticCacheEntry(Base):
@@ -46,9 +49,9 @@ class SemanticCacheEntry(Base):
     )
     model_name: Mapped[str] = mapped_column(String(255), nullable=False)
     question_normalized: Mapped[str] = mapped_column(Text, nullable=False)
-    question_embedding: Mapped[list[float]] = mapped_column(Vector, nullable=False)
+    question_embedding: Mapped[list[float]] = mapped_column(VECTOR_PAYLOAD_TYPE, nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
-    citations: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    citations: Mapped[list[dict]] = mapped_column(JSON_PAYLOAD_TYPE, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
