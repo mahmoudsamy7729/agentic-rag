@@ -17,6 +17,25 @@ class EvaluationRunCreateResponse(BaseModel):
     total_cases: int = Field(description="Number of accepted test cases.")
 
 
+class EvaluationRerunFailedResponse(BaseModel):
+    status: str = Field(description="API operation status.")
+    run_id: UUID = Field(description="Evaluation run id.")
+    queued_failed_cases: int = Field(description="Number of failed cases queued for rerun.")
+
+
+class EvaluationRunConfig(BaseModel):
+    rag_top_k: int | None = Field(default=None)
+    rag_prefetch_k: int | None = Field(default=None)
+    embedding_provider: str | None = Field(default=None)
+    embedding_model: str | None = Field(default=None)
+    reranker_enabled: bool | None = Field(default=None)
+    reranker_model: str | None = Field(default=None)
+    answer_model: str | None = Field(default=None)
+    chunk_strategy: str | None = Field(default=None)
+    chunk_size: int | None = Field(default=None)
+    chunk_overlap: int | None = Field(default=None)
+
+
 class EvaluationRunStatusResponse(BaseModel):
     status: str = Field(description="API operation status.")
     run_id: UUID = Field(description="Evaluation run id.")
@@ -40,6 +59,7 @@ class EvaluationRunStatusResponse(BaseModel):
         description="Average judge groundedness score.",
     )
     error_message: str | None = Field(default=None, description="Top-level run error, if any.")
+    config: EvaluationRunConfig = Field(description="Snapshot of config used for this run.")
     created_at: datetime = Field(description="Run creation timestamp.")
     started_at: datetime | None = Field(default=None, description="Run start timestamp.")
     finished_at: datetime | None = Field(default=None, description="Run finish timestamp.")
@@ -77,6 +97,17 @@ class EvaluationCaseListResponse(BaseModel):
     limit: int = Field(description="Pagination limit used.")
     offset: int = Field(description="Pagination offset used.")
     items: list[EvaluationCaseItem] = Field(default_factory=list, description="Paginated case list.")
+
+
+class EvaluationRunListResponse(BaseModel):
+    status: str = Field(description="API operation status.")
+    total: int = Field(description="Total number of runs in query scope.")
+    limit: int = Field(description="Pagination limit used.")
+    offset: int = Field(description="Pagination offset used.")
+    items: list[EvaluationRunStatusResponse] = Field(
+        default_factory=list,
+        description="Paginated evaluation run summaries.",
+    )
 
 
 class EvaluationReportResponse(BaseModel):

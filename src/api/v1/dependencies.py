@@ -8,7 +8,7 @@ from fastapi import Depends
 from src.infrastructure.database import AsyncSessionFactory
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents import AgentService, QueryRefinementService
+from src.agents import AgentAskPipeline, AgentService, QueryRefinementService
 from src.infrastructure.database import get_db
 from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingProvider
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
@@ -21,8 +21,10 @@ from src.rag.vectorstore import VectorStore
 from src.settings.config import settings
 from src.shared.interfaces.llm import LLM
 from src.tools import PingTool, RetrieverTool, ToolRegistry
+from src.modules.documents.dependencies import DocumentsRepositoryDep
 
 if TYPE_CHECKING:
+    from src.modules.evaluation.config import EvaluationRunConfig
     from src.modules.evaluation.repository import EvaluationRepository
     from src.modules.evaluation.service import EvaluationService
     from src.modules.semantic_cache.repository import SemanticCacheRepository
@@ -233,6 +235,27 @@ def get_agent_service(llm: LLMDep, registry: ToolRegistryDep) -> AgentService:
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
 
 
+def get_agent_ask_pipeline(
+    agent_service: AgentServiceDep,
+    llm: LLMDep,
+    query_refinement_service: QueryRefinementServiceDep,
+    embedding_provider: EmbeddingProviderDep,
+    semantic_cache_service: SemanticCacheServiceDep,
+    documents_repository: DocumentsRepositoryDep,
+) -> AgentAskPipeline:
+    return AgentAskPipeline(
+        agent_service=agent_service,
+        llm=llm,
+        query_refinement_service=query_refinement_service,
+        embedding_provider=embedding_provider,
+        semantic_cache_service=semantic_cache_service,
+        documents_repository=documents_repository,
+    )
+
+
+AgentAskPipelineDep = Annotated[AgentAskPipeline, Depends(get_agent_ask_pipeline)]
+
+
 @lru_cache
 def get_evaluation_agent_service() -> AgentService:
     return AgentService(
@@ -272,9 +295,31 @@ EvaluationJudgeServiceDep = Annotated[
 ]
 
 
+def get_evaluation_run_config() -> "EvaluationRunConfig":
+    from src.modules.evaluation.config import EvaluationRunConfig
+
+    return EvaluationRunConfig(
+        rag_top_k=settings.rag_top_k,
+        rag_prefetch_k=settings.rag_prefetch_k,
+        embedding_provider=settings.embedding_provider,
+        embedding_model=settings.embedding_model,
+        reranker_enabled=settings.reranker_enabled,
+        reranker_model=settings.reranker_model if settings.reranker_enabled else None,
+        answer_model=get_llm().model_name,
+        chunk_strategy="fixed_window",
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
+    )
+
+
+EvaluationRunConfigDep = Annotated["EvaluationRunConfig", Depends(get_evaluation_run_config)]
+
+
 def get_evaluation_service(
     repository: EvaluationRepositoryDep,
     judge_service: EvaluationJudgeServiceDep,
+    run_config: EvaluationRunConfigDep,
+    ask_pipeline: AgentAskPipelineDep,
 ) -> "EvaluationService":
     from src.modules.evaluation.service import EvaluationService
 
@@ -282,12 +327,31 @@ def get_evaluation_service(
         repository=repository,
         retrieval_service=get_rag_retrieval_service(),
         agent_service=get_evaluation_agent_service(),
+        ask_pipeline=ask_pipeline,
         judge_service=judge_service,
         max_cases=settings.eval_max_cases,
+        run_config=run_config,
     )
 
 
 EvaluationServiceDep = Annotated["EvaluationService", Depends(get_evaluation_service)]
+
+
+def _build_agent_ask_pipeline_for_session(
+    *,
+    session: AsyncSession,
+    agent_service: AgentService,
+) -> AgentAskPipeline:
+    from src.modules.documents.repository import DocumentsRepository
+
+    return AgentAskPipeline(
+        agent_service=agent_service,
+        llm=get_llm(),
+        query_refinement_service=get_query_refinement_service(get_llm()),
+        embedding_provider=get_embedding_provider(),
+        semantic_cache_service=get_semantic_cache_service(get_semantic_cache_repository(session)),
+        documents_repository=DocumentsRepository(session),
+    )
 
 
 async def run_evaluation_job(run_id: UUID) -> None:
@@ -301,12 +365,17 @@ async def run_evaluation_job(run_id: UUID) -> None:
             repository=repository,
             retrieval_service=get_rag_retrieval_service(),
             agent_service=get_evaluation_agent_service(),
+            ask_pipeline=_build_agent_ask_pipeline_for_session(
+                session=session,
+                agent_service=get_evaluation_agent_service(),
+            ),
             judge_service=EvaluationJudgeService(
                 llm=get_judge_llm(),
                 max_tokens=settings.eval_judge_max_tokens,
                 timeout_s=settings.eval_judge_timeout_s,
             ),
             max_cases=settings.eval_max_cases,
+            run_config=get_evaluation_run_config(),
         )
         await service.execute_run(run_id=run_id)
 
@@ -317,4 +386,39 @@ def get_evaluation_job_runner() -> Callable[[UUID], Awaitable[None]]:
 
 EvaluationJobRunnerDep = Annotated[
     Callable[[UUID], Awaitable[None]], Depends(get_evaluation_job_runner)
+]
+
+
+async def run_evaluation_rerun_failed_job(run_id: UUID) -> None:
+    from src.modules.evaluation.judge import EvaluationJudgeService
+    from src.modules.evaluation.repository import EvaluationRepository
+    from src.modules.evaluation.service import EvaluationService
+
+    async with AsyncSessionFactory() as session:
+        repository = EvaluationRepository(session)
+        service = EvaluationService(
+            repository=repository,
+            retrieval_service=get_rag_retrieval_service(),
+            agent_service=get_evaluation_agent_service(),
+            ask_pipeline=_build_agent_ask_pipeline_for_session(
+                session=session,
+                agent_service=get_evaluation_agent_service(),
+            ),
+            judge_service=EvaluationJudgeService(
+                llm=get_judge_llm(),
+                max_tokens=settings.eval_judge_max_tokens,
+                timeout_s=settings.eval_judge_timeout_s,
+            ),
+            max_cases=settings.eval_max_cases,
+            run_config=get_evaluation_run_config(),
+        )
+        await service.execute_rerun_failed(run_id=run_id)
+
+
+def get_evaluation_rerun_failed_job_runner() -> Callable[[UUID], Awaitable[None]]:
+    return run_evaluation_rerun_failed_job
+
+
+EvaluationRerunFailedJobRunnerDep = Annotated[
+    Callable[[UUID], Awaitable[None]], Depends(get_evaluation_rerun_failed_job_runner)
 ]

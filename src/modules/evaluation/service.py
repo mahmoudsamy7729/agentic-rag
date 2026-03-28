@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from src.agents import AgentService
+from src.agents import AgentAskPipeline, AgentService
+from src.modules.evaluation.config import EvaluationRunConfig
 from src.modules.evaluation.judge import EvaluationJudgeService, JudgeScore
 from src.modules.evaluation.models import EvaluationCase, EvaluationRun
 from src.modules.evaluation.repository import EvaluationRepository
@@ -29,14 +30,18 @@ class EvaluationService:
         repository: EvaluationRepository,
         retrieval_service: RAGRetrievalService,
         agent_service: AgentService,
+        ask_pipeline: AgentAskPipeline,
         judge_service: EvaluationJudgeService,
         max_cases: int,
+        run_config: EvaluationRunConfig,
     ) -> None:
         self._repository = repository
         self._retrieval_service = retrieval_service
         self._agent_service = agent_service
+        self._ask_pipeline = ask_pipeline
         self._judge_service = judge_service
         self._max_cases = max_cases
+        self._run_config = run_config
 
     async def create_run_from_dataset(
         self,
@@ -54,13 +59,43 @@ class EvaluationService:
             dataset_name=dataset_name,
             dataset_sha256=dataset_sha256,
             total_cases=len(rows),
+            run_config=self._run_config,
         )
         await self._repository.create_cases(run_id=run.id, rows=rows)
         await self._repository.commit()
         return run
 
+    async def list_runs(
+        self,
+        *,
+        owner_user_id: UUID,
+        doc_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[EvaluationRun], int]:
+        runs = await self._repository.list_owned_runs(
+            owner_user_id=owner_user_id,
+            doc_id=doc_id,
+            limit=limit,
+            offset=offset,
+        )
+        total = await self._repository.count_owned_runs(owner_user_id=owner_user_id, doc_id=doc_id)
+        return runs, total
+
     async def get_run_status(self, *, owner_user_id: UUID, run_id: UUID) -> EvaluationRun | None:
         return await self._repository.get_owned_run(owner_user_id=owner_user_id, run_id=run_id)
+
+    async def get_owned_run_failed_count(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+    ) -> tuple[EvaluationRun, int] | None:
+        run = await self._repository.get_owned_run(owner_user_id=owner_user_id, run_id=run_id)
+        if run is None:
+            return None
+        failed_cases = await self._repository.list_failed_cases_for_run(run_id=run_id)
+        return run, len(failed_cases)
 
     async def list_run_cases(
         self,
@@ -184,6 +219,96 @@ class EvaluationService:
                 completeness_avg=self._avg([float(score.completeness) for score in judge_scores]),
                 relevance_avg=self._avg([float(score.relevance) for score in judge_scores]),
                 groundedness_avg=self._avg([float(score.groundedness) for score in judge_scores]),
+            )
+            await self._repository.commit()
+        except Exception as exc:
+            await self._repository.rollback()
+            run = await self._repository.get_run(run_id=run_id)
+            if run is None:
+                return
+            await self._repository.fail_run(run=run, error_message=str(exc)[:2000])
+            await self._repository.commit()
+
+    async def execute_rerun_failed(self, *, run_id: UUID) -> None:
+        run = await self._repository.get_run(run_id=run_id)
+        if run is None:
+            return
+        if run.status == "running":
+            return
+
+        try:
+            await self._repository.mark_run_rerun_started(run=run)
+            await self._repository.commit()
+            failed_cases = await self._repository.list_failed_cases_for_run(run_id=run_id)
+
+            for case in failed_cases:
+                case.status = "running"
+                case.error_message = None
+                await self._repository.commit()
+                try:
+                    chunks = await self._retrieval_service.retrieve(
+                        query=case.question,
+                        doc_id=run.doc_id,
+                    )
+                    retrieved_chunk_ids = [chunk.chunk_id for chunk in chunks]
+                    metric = self.compute_retrieval_metrics(
+                        expected_chunk_ids=case.expected_chunk_ids,
+                        retrieved_chunk_ids=retrieved_chunk_ids,
+                    )
+
+                    case.retrieved_chunk_ids = retrieved_chunk_ids
+                    case.hit = metric.hit
+                    case.recall = metric.recall
+                    case.first_relevant_rank = metric.first_relevant_rank
+                    case.reciprocal_rank = metric.reciprocal_rank
+
+                    ask_result = await self._ask_pipeline.ask(
+                        owner_user_id=run.owner_user_id,
+                        question=case.question,
+                        doc_id=run.doc_id,
+                        session_id=f"rerun-{run.id}-{case.case_index}",
+                        use_cache=False,
+                    )
+
+                    case.generated_answer = ask_result.answer
+                    case.citations = list(ask_result.citations or [])
+                    score = await self._judge_service.evaluate(
+                        question=case.question,
+                        generated_answer=ask_result.answer,
+                        reference_answer=case.reference_answer,
+                        citations=case.citations,
+                    )
+                    case.accuracy = score.accuracy
+                    case.completeness = score.completeness
+                    case.relevance = score.relevance
+                    case.groundedness = score.groundedness
+                    case.judge_feedback = score.feedback
+                    case.status = "completed"
+                    case.error_message = None
+                except Exception as exc:
+                    case.status = "failed"
+                    case.error_message = str(exc)[:2000]
+                finally:
+                    await self._repository.commit()
+
+            all_cases = await self._repository.list_run_cases(run_id=run_id)
+            failed_count = sum(1 for case in all_cases if case.status == "failed")
+
+            await self._repository.set_run_with_aggregates(
+                run=run,
+                status="completed" if failed_count == 0 else "failed",
+                error_message=(
+                    None
+                    if failed_count == 0
+                    else f"{failed_count} case(s) still failed after rerun."
+                ),
+                hit_at_k=self._avg([1.0 if case.hit else 0.0 for case in all_cases if case.hit is not None]),
+                recall_at_k=self._avg([float(case.recall) for case in all_cases if case.recall is not None]),
+                mrr=self._avg([float(case.reciprocal_rank) for case in all_cases if case.reciprocal_rank is not None]),
+                accuracy_avg=self._avg([float(case.accuracy) for case in all_cases if case.accuracy is not None]),
+                completeness_avg=self._avg([float(case.completeness) for case in all_cases if case.completeness is not None]),
+                relevance_avg=self._avg([float(case.relevance) for case in all_cases if case.relevance is not None]),
+                groundedness_avg=self._avg([float(case.groundedness) for case in all_cases if case.groundedness is not None]),
             )
             await self._repository.commit()
         except Exception as exc:
