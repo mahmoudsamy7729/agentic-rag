@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Documents</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
+    .wrap { max-width: 1150px; margin: 0 auto; padding: 24px; }
+    .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { border: 1px solid #d8dee9; border-radius: 8px; padding: 8px 10px; font-size: 13px; text-decoration: none; background: #fff; color: #111827; cursor: pointer; }
+    h1 { margin: 0; font-size: 28px; }
+    h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
+    label { display: block; margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
+    input, textarea, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    textarea, input { width: 100%; }
+    textarea { min-height: 190px; resize: vertical; }
+    button { cursor: pointer; }
+    .row { display: grid; grid-template-columns: 1.4fr 0.9fr; gap: 16px; }
+    .stack { display: grid; gap: 16px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+    .danger { background: #fff1f2; border-color: #fecdd3; color: #be123c; }
+    .mono { font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .msg { margin-top: 8px; }
+    .result { white-space: pre-wrap; border: 1px dashed #d8dee9; border-radius: 10px; padding: 12px; background: #fafcff; min-height: 92px; }
+    .table-wrap { border: 1px solid #d8dee9; border-radius: 10px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    th, td { border-bottom: 1px solid #edf2f7; padding: 10px; text-align: left; vertical-align: top; }
+    th { font-size: 11px; text-transform: uppercase; color: #6b7280; background: #f9fafb; }
+    .muted { color: #6b7280; }
+    .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .row-actions button, .row-actions a { border: 1px solid #d8dee9; border-radius: 8px; padding: 6px 10px; font-size: 12px; background: #fff; color: #111827; text-decoration: none; cursor: pointer; }
+    @media (max-width: 920px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="panel">
+      <div class="top">
+        <div>
+          <h1>Documents</h1>
+          <div class="mono">Ingest text or PDF files and manage the documents you own.</div>
+        </div>
+        <div class="nav">
+          <a href="/documents-ui">Documents</a>
+          <a href="/ask-ui">Ask</a>
+          <a href="/evaluation-ui">Evaluation</a>
+          <a href="/evaluation-history-ui">History</a>
+          <button id="logoutBtn" type="button">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="row">
+      <div class="panel">
+        <h2>Text Ingestion</h2>
+        <label for="textInput">Raw Text</label>
+        <textarea id="textInput" placeholder="Paste the document text here. The backend will generate a new doc_id automatically."></textarea>
+        <div class="actions">
+          <button id="ingestTextBtn" class="primary" type="button">Create Document From Text</button>
+        </div>
+        <div id="textMsg" class="mono msg">Ready.</div>
+      </div>
+
+      <div class="stack">
+        <div class="panel">
+          <h2>PDF Ingestion</h2>
+          <label for="pdfInput">PDF File</label>
+          <input id="pdfInput" type="file" accept="application/pdf,.pdf" />
+          <div class="actions">
+            <button id="ingestPdfBtn" class="primary" type="button">Create Document From PDF</button>
+          </div>
+          <div id="pdfMsg" class="mono msg">Ready.</div>
+        </div>
+
+        <div class="panel">
+          <h2>Last Result</h2>
+          <div id="resultBox" class="result mono">No ingestion has been run yet.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="top">
+        <div>
+          <h2>Owned Documents</h2>
+          <div class="muted">Active documents only. Delete is soft delete plus vector cleanup.</div>
+        </div>
+        <div class="actions" style="margin-top:0;">
+          <button id="refreshDocsBtn" type="button">Refresh Documents</button>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>doc_id</th>
+              <th>source</th>
+              <th>created_at</th>
+              <th>updated_at</th>
+              <th>actions</th>
+            </tr>
+          </thead>
+          <tbody id="documentsBody">
+            <tr><td colspan="5" class="mono">Loading documents...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="docsMsg" class="mono msg">Ready.</div>
+    </section>
+  </main>
+
+  <script src="/static/js/ui_auth.js"></script>
+  <script>
+    const state = {
+      lastDocId: null,
+    };
+
+    const el = {
+      textInput: document.getElementById("textInput"),
+      ingestTextBtn: document.getElementById("ingestTextBtn"),
+      textMsg: document.getElementById("textMsg"),
+      pdfInput: document.getElementById("pdfInput"),
+      ingestPdfBtn: document.getElementById("ingestPdfBtn"),
+      pdfMsg: document.getElementById("pdfMsg"),
+      resultBox: document.getElementById("resultBox"),
+      documentsBody: document.getElementById("documentsBody"),
+      refreshDocsBtn: document.getElementById("refreshDocsBtn"),
+      docsMsg: document.getElementById("docsMsg"),
+      logoutBtn: document.getElementById("logoutBtn"),
+    };
+
+    function setTextMsg(text) {
+      el.textMsg.textContent = text;
+    }
+
+    function setPdfMsg(text) {
+      el.pdfMsg.textContent = text;
+    }
+
+    function setDocsMsg(text) {
+      el.docsMsg.textContent = text;
+    }
+
+    function fmtDate(value) {
+      if (!value) return "-";
+      const dt = new Date(value);
+      if (Number.isNaN(dt.getTime())) return String(value);
+      return dt.toLocaleString();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function renderResult(payload, kind) {
+      state.lastDocId = payload.doc_id || null;
+      const lines = [
+        `type=${kind}`,
+        `status=${payload.status}`,
+        `doc_id=${payload.doc_id}`,
+        `chunks_ingested=${payload.chunks_ingested}`,
+      ];
+      if (kind === "pdf") {
+        lines.push(`pages_total=${payload.pages_total}`);
+        lines.push(`pages_ingested=${payload.pages_ingested}`);
+        lines.push(`skipped_pages=${JSON.stringify(payload.skipped_pages || [])}`);
+        lines.push(`warnings=${JSON.stringify(payload.warnings || [])}`);
+      }
+      lines.push("");
+      lines.push(`Ask this document: /ask-ui?doc_id=${payload.doc_id}`);
+      el.resultBox.textContent = lines.join("\n");
+    }
+
+    function renderDocuments(items) {
+      if (!items || !items.length) {
+        el.documentsBody.innerHTML = `<tr><td colspan="5" class="mono">No documents found.</td></tr>`;
+        return;
+      }
+      el.documentsBody.innerHTML = items.map((item) => `
+        <tr>
+          <td class="mono">${escapeHtml(item.doc_id)}</td>
+          <td>${escapeHtml(item.source || "-")}</td>
+          <td class="mono">${escapeHtml(fmtDate(item.created_at))}</td>
+          <td class="mono">${escapeHtml(fmtDate(item.updated_at))}</td>
+          <td>
+            <div class="row-actions">
+              <a href="/ask-ui?doc_id=${encodeURIComponent(item.doc_id)}">Ask</a>
+              <button type="button" class="danger" data-delete-doc-id="${escapeHtml(item.doc_id)}">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function loadDocuments() {
+      const payload = await window.uiAuth.apiFetch("/documents?limit=100&offset=0");
+      renderDocuments(payload.items || []);
+      setDocsMsg(`Loaded ${(payload.items || []).length} document(s).`);
+    }
+
+    async function ingestText() {
+      const text = el.textInput.value.trim();
+      if (!text) {
+        throw new Error("Text is required.");
+      }
+      const payload = await window.uiAuth.apiFetch("/rag/ingest/text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      renderResult(payload, "text");
+      el.textInput.value = "";
+      await loadDocuments();
+      setTextMsg(`Document created: ${payload.doc_id}`);
+    }
+
+    async function ingestPdf() {
+      const file = el.pdfInput.files && el.pdfInput.files[0];
+      if (!file) {
+        throw new Error("PDF file is required.");
+      }
+      const form = new FormData();
+      form.append("file", file);
+      const payload = await window.uiAuth.apiFetch("/rag/ingest/pdf", {
+        method: "POST",
+        body: form,
+      });
+      renderResult(payload, "pdf");
+      el.pdfInput.value = "";
+      await loadDocuments();
+      setPdfMsg(`Document created: ${payload.doc_id}`);
+    }
+
+    async function deleteDocument(docId) {
+      await window.uiAuth.apiFetch(`/documents/${encodeURIComponent(docId)}`, {
+        method: "DELETE",
+      });
+      if (state.lastDocId === docId) {
+        state.lastDocId = null;
+      }
+      await loadDocuments();
+      setDocsMsg(`Deleted ${docId}.`);
+    }
+
+    el.ingestTextBtn.addEventListener("click", async () => {
+      try {
+        setTextMsg("Creating document from text...");
+        await ingestText();
+      } catch (err) {
+        setTextMsg(String(err?.message || err));
+      }
+    });
+
+    el.ingestPdfBtn.addEventListener("click", async () => {
+      try {
+        setPdfMsg("Creating document from PDF...");
+        await ingestPdf();
+      } catch (err) {
+        setPdfMsg(String(err?.message || err));
+      }
+    });
+
+    el.refreshDocsBtn.addEventListener("click", async () => {
+      try {
+        setDocsMsg("Refreshing documents...");
+        await loadDocuments();
+      } catch (err) {
+        setDocsMsg(String(err?.message || err));
+      }
+    });
+
+    el.documentsBody.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const docId = target.getAttribute("data-delete-doc-id");
+      if (!docId) return;
+      try {
+        setDocsMsg(`Deleting ${docId}...`);
+        await deleteDocument(docId);
+      } catch (err) {
+        setDocsMsg(String(err?.message || err));
+      }
+    });
+
+    el.logoutBtn.addEventListener("click", () => {
+      window.uiAuth.logout();
+    });
+
+    (async function init() {
+      window.uiAuth.requireAuthOrRedirect();
+      try {
+        await loadDocuments();
+      } catch (err) {
+        setDocsMsg(String(err?.message || err));
+      }
+    })();
+  </script>
+</body>
+</html>

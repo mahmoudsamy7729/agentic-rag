@@ -26,3 +26,13 @@ async def ask_ui(request: Request):
             "request": request,
         },
     )
+
+
+@router.get("/documents-ui", response_class=HTMLResponse, include_in_schema=False)
+async def documents_ui(request: Request):
+    return templates.TemplateResponse(
+        "documents_ui.html",
+        {
+            "request": request,
+        },
+    )
