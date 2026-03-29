@@ -37,6 +37,7 @@
       <div class="top">
         <h1>Ask Agent</h1>
         <div class="nav">
+          <a href="/documents-ui">Documents</a>
           <a href="/evaluation-ui">Evaluation</a>
           <a href="/evaluation-history-ui">History</a>
           <button id="logoutBtn" type="button">Logout</button>
@@ -145,17 +146,36 @@
       return el.docSelect.value || "";
     }
 
+    function getRequestedDocId() {
+      const params = new URLSearchParams(window.location.search);
+      return (params.get("doc_id") || "").trim();
+    }
+
+    function applyRequestedDocId(items) {
+      const requested = getRequestedDocId();
+      if (!requested) return;
+      const match = (items || []).find((item) => item.doc_id === requested);
+      if (match) {
+        el.docSelect.value = requested;
+        el.docIdInput.value = "";
+        return;
+      }
+      el.docIdInput.value = requested;
+    }
+
     async function loadDocuments() {
       const payload = await window.uiAuth.apiFetch("/documents?limit=100&offset=0");
       const items = payload.items || [];
       if (!items.length) {
         el.docSelect.innerHTML = `<option value="">No documents found</option>`;
+        applyRequestedDocId(items);
         return;
       }
       el.docSelect.innerHTML = items.map((item) => {
         const source = item.source || "unknown-source";
         return `<option value="${item.doc_id}">${item.doc_id} | ${source}</option>`;
       }).join("");
+      applyRequestedDocId(items);
     }
 
     async function askAgent() {
