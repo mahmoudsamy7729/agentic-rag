@@ -14,7 +14,7 @@ from src.modules.documents import DocumentsRepositoryDep
 from src.modules.users.dependencies import ActiveUserDep
 from src.settings.config import settings
 
-router = APIRouter()
+router = APIRouter(tags=["rag"])
 
 
 @router.post("/rag/ingest/text", response_model=RAGIngestTextResponse)
@@ -44,10 +44,14 @@ async def ingest_text(
             text=payload.text,
             source=payload.source,
             doc_id=resolved_doc_id,
+            chunking_strategy=payload.chunking_strategy,
         )
         await repository.mark_document_indexed(
             owner_user_id=current_user.id,
             doc_id=resolved_doc_id,
+            chunking_strategy=result.chunking_strategy,
+            chunk_size=result.chunk_size,
+            chunk_overlap=result.chunk_overlap,
         )
         await repository.commit()
     except ValueError as exc:
@@ -75,6 +79,7 @@ async def ingest_pdf(
     current_user: ActiveUserDep,
     source: Annotated[str | None, Form()] = None,
     doc_id: Annotated[str | None, Form()] = None,
+    chunking_strategy: Annotated[str | None, Form()] = None,
 ):
     if file.content_type not in {"application/pdf", "application/x-pdf"}:
         raise HTTPException(status_code=422, detail="Only PDF files are supported.")
@@ -106,10 +111,14 @@ async def ingest_pdf(
             pdf_bytes=payload,
             source=resolved_source,
             doc_id=resolved_doc_id,
+            chunking_strategy=chunking_strategy,
         )
         await repository.mark_document_indexed(
             owner_user_id=current_user.id,
             doc_id=resolved_doc_id,
+            chunking_strategy=result.chunking_strategy,
+            chunk_size=result.chunk_size,
+            chunk_overlap=result.chunk_overlap,
         )
         await repository.commit()
     except ValueError as exc:

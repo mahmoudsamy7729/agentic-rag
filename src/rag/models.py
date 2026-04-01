@@ -10,6 +10,9 @@ class RAGChunk:
     source: str
     text: str
     page_number: int | None = None
+    chunking_strategy: str | None = None
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
 
 
 @dataclass(slots=True)

@@ -19,11 +19,17 @@ class DocumentsRepository:
         owner_user_id: UUID,
         doc_id: str,
         source: str | None,
+        chunking_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> Document:
         document = Document(
             id=doc_id,
             owner_user_id=owner_user_id,
             source=source,
+            chunking_strategy=chunking_strategy,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
         self._session.add(document)
         await self._session.flush()
@@ -105,6 +111,9 @@ class DocumentsRepository:
         owner_user_id: UUID,
         doc_id: str,
         indexed_at: datetime | None = None,
+        chunking_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> Document | None:
         document = await self.get_owned_document(
             owner_user_id=owner_user_id,
@@ -117,6 +126,12 @@ class DocumentsRepository:
         now = indexed_at or datetime.now(timezone.utc)
         document.last_indexed_at = now
         document.updated_at = now
+        if chunking_strategy is not None:
+            document.chunking_strategy = chunking_strategy
+        if chunk_size is not None:
+            document.chunk_size = chunk_size
+        if chunk_overlap is not None:
+            document.chunk_overlap = chunk_overlap
         await self._session.flush()
         return document
 

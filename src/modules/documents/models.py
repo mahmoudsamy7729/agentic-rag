@@ -20,6 +20,9 @@ class Document(Base):
         index=True,
     )
     source: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    chunking_strategy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    chunk_size: Mapped[int | None] = mapped_column(nullable=True)
+    chunk_overlap: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -88,6 +88,12 @@ class ChromaVectorStore(VectorStore):
         }
         if chunk.page_number is not None:
             metadata["page_number"] = int(chunk.page_number)
+        if chunk.chunking_strategy is not None:
+            metadata["chunking_strategy"] = chunk.chunking_strategy
+        if chunk.chunk_size is not None:
+            metadata["chunk_size"] = int(chunk.chunk_size)
+        if chunk.chunk_overlap is not None:
+            metadata["chunk_overlap"] = int(chunk.chunk_overlap)
         return metadata
 
     @staticmethod

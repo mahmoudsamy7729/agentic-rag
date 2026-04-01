@@ -17,7 +17,7 @@ from src.modules.users.security.jwt import (
 )
 from src.settings.config import settings
 
-router = APIRouter()
+router = APIRouter(tags=["auth"])
 
 
 def _set_auth_cookies(response: JSONResponse, *, access_token: str, refresh_token: str) -> None:

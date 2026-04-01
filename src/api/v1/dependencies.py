@@ -14,7 +14,12 @@ from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingPr
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
 from src.infrastructure.llm.openai_llm import OpenAILLM
 from src.rag.embeddings import EmbeddingProvider
-from src.rag.ingestion import PDFExtractor, PDFPlumberExtractor
+from src.rag.ingestion import (
+    ChunkingStrategyRegistry,
+    FixedWindowChunkingStrategy,
+    PDFExtractor,
+    PDFPlumberExtractor,
+)
 from src.rag.pipeline import RAGIngestionService, RAGRetrievalService
 from src.rag.reranker import Reranker
 from src.rag.vectorstore import VectorStore
@@ -24,6 +29,7 @@ from src.tools import PingTool, RetrieverTool, ToolRegistry
 from src.modules.documents.dependencies import DocumentsRepositoryDep
 
 if TYPE_CHECKING:
+    from src.modules.documents.models import Document
     from src.modules.evaluation.config import EvaluationRunConfig
     from src.modules.evaluation.repository import EvaluationRepository
     from src.modules.evaluation.service import EvaluationService
@@ -176,10 +182,22 @@ PDFExtractorDep = Annotated[PDFExtractor, Depends(get_pdf_extractor)]
 
 
 @lru_cache
+def get_chunking_registry() -> ChunkingStrategyRegistry:
+    return ChunkingStrategyRegistry([FixedWindowChunkingStrategy()])
+
+
+ChunkingRegistryDep = Annotated[ChunkingStrategyRegistry, Depends(get_chunking_registry)]
+
+
+@lru_cache
 def get_rag_ingestion_service() -> RAGIngestionService:
+    registry = get_chunking_registry()
+    registry.resolve(settings.default_chunking_strategy)
     return RAGIngestionService(
         embedding_provider=get_embedding_provider(),
         vector_store=get_vector_store(),
+        chunking_registry=registry,
+        default_chunking_strategy=settings.default_chunking_strategy,
         chunk_size=settings.rag_chunk_size,
         chunk_overlap=settings.rag_chunk_overlap,
         pdf_extractor=get_pdf_extractor(),
@@ -295,8 +313,27 @@ EvaluationJudgeServiceDep = Annotated[
 ]
 
 
-def get_evaluation_run_config() -> "EvaluationRunConfig":
+def build_evaluation_run_config(
+    *,
+    document: "Document | None" = None,
+) -> "EvaluationRunConfig":
     from src.modules.evaluation.config import EvaluationRunConfig
+
+    chunk_strategy = (
+        document.chunking_strategy
+        if document is not None and document.chunking_strategy
+        else settings.default_chunking_strategy
+    )
+    chunk_size = (
+        document.chunk_size
+        if document is not None and document.chunk_size is not None
+        else settings.rag_chunk_size
+    )
+    chunk_overlap = (
+        document.chunk_overlap
+        if document is not None and document.chunk_overlap is not None
+        else settings.rag_chunk_overlap
+    )
 
     return EvaluationRunConfig(
         rag_top_k=settings.rag_top_k,
@@ -306,10 +343,14 @@ def get_evaluation_run_config() -> "EvaluationRunConfig":
         reranker_enabled=settings.reranker_enabled,
         reranker_model=settings.reranker_model if settings.reranker_enabled else None,
         answer_model=get_llm().model_name,
-        chunk_strategy="fixed_window",
-        chunk_size=settings.rag_chunk_size,
-        chunk_overlap=settings.rag_chunk_overlap,
+        chunk_strategy=chunk_strategy,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
+
+
+def get_evaluation_run_config() -> "EvaluationRunConfig":
+    return build_evaluation_run_config()
 
 
 EvaluationRunConfigDep = Annotated["EvaluationRunConfig", Depends(get_evaluation_run_config)]

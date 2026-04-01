@@ -5,7 +5,7 @@ from src.api.v1.schemas import DocumentDeleteResponse, DocumentItem, DocumentLis
 from src.modules.documents import DocumentsRepositoryDep
 from src.modules.users.dependencies import ActiveUserDep
 
-router = APIRouter()
+router = APIRouter(tags=["documents"])
 
 
 @router.get("/documents", response_model=DocumentListResponse)

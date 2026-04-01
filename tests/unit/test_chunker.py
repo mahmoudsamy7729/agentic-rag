@@ -1,4 +1,10 @@
-from src.rag.ingestion.chunker import chunk_text
+import pytest
+
+from src.rag.ingestion.chunker import (
+    ChunkingStrategyRegistry,
+    FixedWindowChunkingStrategy,
+    chunk_text,
+)
 
 
 def test_chunker_uses_overlap_and_stable_ids():
@@ -20,3 +26,13 @@ def test_chunker_uses_overlap_and_stable_ids():
     assert chunks[0].text == "abcdefghij"
     assert chunks[1].text.startswith("hij")
     assert all(chunk.doc_id == "doc-1" for chunk in chunks)
+    assert all(chunk.chunking_strategy == "fixed_window" for chunk in chunks)
+    assert all(chunk.chunk_size == 10 for chunk in chunks)
+    assert all(chunk.chunk_overlap == 3 for chunk in chunks)
+
+
+def test_chunking_registry_rejects_unknown_strategy():
+    registry = ChunkingStrategyRegistry([FixedWindowChunkingStrategy()])
+
+    with pytest.raises(ValueError, match="Unsupported chunking_strategy"):
+        registry.resolve("recursive_semantic")
