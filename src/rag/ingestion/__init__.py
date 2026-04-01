@@ -1,4 +1,4 @@
-from src.rag.ingestion.chunker import (
+from src.rag.ingestion.chunking import (
     ChunkingStrategy,
     ChunkingStrategyRegistry,
     FixedWindowChunkingStrategy,
