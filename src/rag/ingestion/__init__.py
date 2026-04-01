@@ -2,6 +2,7 @@ from src.rag.ingestion.chunker import (
     ChunkingStrategy,
     ChunkingStrategyRegistry,
     FixedWindowChunkingStrategy,
+    RecursiveSemanticChunkingStrategy,
     chunk_text,
 )
 from src.rag.ingestion.pdf_extractor import (
@@ -20,4 +21,5 @@ __all__ = [
     "ChunkingStrategy",
     "ChunkingStrategyRegistry",
     "FixedWindowChunkingStrategy",
+    "RecursiveSemanticChunkingStrategy",
 ]

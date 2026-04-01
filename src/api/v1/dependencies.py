@@ -19,6 +19,7 @@ from src.rag.ingestion import (
     FixedWindowChunkingStrategy,
     PDFExtractor,
     PDFPlumberExtractor,
+    RecursiveSemanticChunkingStrategy,
 )
 from src.rag.pipeline import RAGIngestionService, RAGRetrievalService
 from src.rag.reranker import Reranker
@@ -183,7 +184,12 @@ PDFExtractorDep = Annotated[PDFExtractor, Depends(get_pdf_extractor)]
 
 @lru_cache
 def get_chunking_registry() -> ChunkingStrategyRegistry:
-    return ChunkingStrategyRegistry([FixedWindowChunkingStrategy()])
+    return ChunkingStrategyRegistry(
+        [
+            FixedWindowChunkingStrategy(),
+            RecursiveSemanticChunkingStrategy(),
+        ]
+    )
 
 
 ChunkingRegistryDep = Annotated[ChunkingStrategyRegistry, Depends(get_chunking_registry)]
