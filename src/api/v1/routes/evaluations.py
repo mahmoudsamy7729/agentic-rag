@@ -11,6 +11,7 @@ from src.api.v1.dependencies import (
     EvaluationJobRunnerDep,
     EvaluationRerunFailedJobRunnerDep,
     EvaluationServiceDep,
+    build_evaluation_run_config,
 )
 from src.api.v1.schemas import (
     EvaluationCaseItem,
@@ -27,7 +28,7 @@ from src.modules.evaluation.models import EvaluationCase, EvaluationRun
 from src.modules.users.dependencies import ActiveUserDep
 from src.settings.config import settings
 
-router = APIRouter()
+router = APIRouter(tags=["evaluations"])
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
 
 
@@ -98,6 +99,7 @@ async def create_rag_evaluation_run(
             doc_id=doc_id,
             dataset_name=file.filename,
             dataset_bytes=payload,
+            run_config=build_evaluation_run_config(document=document),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

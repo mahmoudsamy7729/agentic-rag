@@ -7,7 +7,7 @@ from src.shared.interfaces.tool import ToolContext
 
 
 
-router = APIRouter()
+router = APIRouter(tags=["health"])
 
 @router.get("/llm/health", response_model=LLMHealthResponse)
 async def llm_health(llm: LLMDep):

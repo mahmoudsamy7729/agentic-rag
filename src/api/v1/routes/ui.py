@@ -3,6 +3,8 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from src.api.v1.dependencies import get_chunking_registry
+from src.settings.config import settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[4] / "templates"))
@@ -34,5 +36,7 @@ async def documents_ui(request: Request):
         "documents_ui.html",
         {
             "request": request,
+            "chunking_strategies": get_chunking_registry().names(),
+            "default_chunking_strategy": settings.default_chunking_strategy,
         },
     )

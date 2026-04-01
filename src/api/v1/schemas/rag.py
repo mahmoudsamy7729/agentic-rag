@@ -3,6 +3,10 @@ from pydantic import BaseModel, Field
 
 class RAGIngestTextRequest(BaseModel):
     text: str = Field(min_length=1, description="Raw text to index.")
+    chunking_strategy: str | None = Field(
+        default=None,
+        description="Optional chunking strategy; default strategy is used if omitted.",
+    )
     source: str | None = Field(
         default=None,
         description="Optional source label (file name, URL, or domain key).",

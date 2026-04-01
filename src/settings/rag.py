@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings
 
 
 class RAGSettings(BaseSettings):
+    default_chunking_strategy: str = Field(default="fixed_window")
     rag_collection_name: str | None = Field(default=None)
     rag_top_k: int = Field(default=12, ge=1, le=100)
     rag_prefetch_k: int = Field(default=80, ge=1, le=200)

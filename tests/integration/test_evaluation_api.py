@@ -26,6 +26,9 @@ class FakeDocument:
     id: str
     owner_user_id: UUID
     deleted_at: datetime | None = None
+    chunking_strategy: str | None = "fixed_window"
+    chunk_size: int | None = 800
+    chunk_overlap: int | None = 120
 
 
 @dataclass
@@ -256,6 +259,7 @@ def test_rerun_rejects_running_run():
 
 def test_evaluation_pages_render():
     client = TestClient(app)
+    assert client.get("/documents-ui").status_code == 200
     assert client.get("/evaluation-ui").status_code == 200
     assert client.get("/evaluation-history-ui").status_code == 200
     assert client.get(f"/evaluation-runs/{uuid4()}/ui").status_code == 200

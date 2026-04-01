@@ -7,7 +7,7 @@ from src.api.v1.dependencies import (
 from src.api.v1.schemas import AgentAskRequest, AgentAskResponse
 from src.modules.users.dependencies import ActiveUserDep
 
-router = APIRouter()
+router = APIRouter(tags=["agent"])
 
 
 @router.post("/agent/ask", response_model=AgentAskResponse)

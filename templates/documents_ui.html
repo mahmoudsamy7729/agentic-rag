@@ -14,8 +14,8 @@
     h1 { margin: 0; font-size: 28px; }
     h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
     label { display: block; margin: 10px 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
-    input, textarea, button { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
-    textarea, input { width: 100%; }
+    input, textarea, button, select { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    textarea, input, select { width: 100%; }
     textarea { min-height: 190px; resize: vertical; }
     button { cursor: pointer; }
     .row { display: grid; grid-template-columns: 1.4fr 0.9fr; gap: 16px; }
@@ -57,6 +57,12 @@
     <section class="row">
       <div class="panel">
         <h2>Text Ingestion</h2>
+        <label for="textChunkingStrategy">Chunking Strategy</label>
+        <select id="textChunkingStrategy">
+          {% for strategy in chunking_strategies %}
+          <option value="{{ strategy }}" {% if strategy == default_chunking_strategy %}selected{% endif %}>{{ strategy }}</option>
+          {% endfor %}
+        </select>
         <label for="textInput">Raw Text</label>
         <textarea id="textInput" placeholder="Paste the document text here. The backend will generate a new doc_id automatically."></textarea>
         <div class="actions">
@@ -68,6 +74,12 @@
       <div class="stack">
         <div class="panel">
           <h2>PDF Ingestion</h2>
+          <label for="pdfChunkingStrategy">Chunking Strategy</label>
+          <select id="pdfChunkingStrategy">
+            {% for strategy in chunking_strategies %}
+            <option value="{{ strategy }}" {% if strategy == default_chunking_strategy %}selected{% endif %}>{{ strategy }}</option>
+            {% endfor %}
+          </select>
           <label for="pdfInput">PDF File</label>
           <input id="pdfInput" type="file" accept="application/pdf,.pdf" />
           <div class="actions">
@@ -122,9 +134,11 @@
 
     const el = {
       textInput: document.getElementById("textInput"),
+      textChunkingStrategy: document.getElementById("textChunkingStrategy"),
       ingestTextBtn: document.getElementById("ingestTextBtn"),
       textMsg: document.getElementById("textMsg"),
       pdfInput: document.getElementById("pdfInput"),
+      pdfChunkingStrategy: document.getElementById("pdfChunkingStrategy"),
       ingestPdfBtn: document.getElementById("ingestPdfBtn"),
       pdfMsg: document.getElementById("pdfMsg"),
       resultBox: document.getElementById("resultBox"),
@@ -169,6 +183,7 @@
         `status=${payload.status}`,
         `doc_id=${payload.doc_id}`,
         `chunks_ingested=${payload.chunks_ingested}`,
+        `chunking_strategy=${kind === "text" ? el.textChunkingStrategy.value : el.pdfChunkingStrategy.value}`,
       ];
       if (kind === "pdf") {
         lines.push(`pages_total=${payload.pages_total}`);
@@ -216,7 +231,10 @@
       const payload = await window.uiAuth.apiFetch("/rag/ingest/text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          chunking_strategy: el.textChunkingStrategy.value,
+        }),
       });
       renderResult(payload, "text");
       el.textInput.value = "";
@@ -231,6 +249,7 @@
       }
       const form = new FormData();
       form.append("file", file);
+      form.append("chunking_strategy", el.pdfChunkingStrategy.value);
       const payload = await window.uiAuth.apiFetch("/rag/ingest/pdf", {
         method: "POST",
         body: form,

@@ -50,6 +50,7 @@ class EvaluationService:
         doc_id: str,
         dataset_name: str,
         dataset_bytes: bytes,
+        run_config: EvaluationRunConfig | None = None,
     ) -> EvaluationRun:
         rows = self._parse_dataset(dataset_bytes)
         dataset_sha256 = hashlib.sha256(dataset_bytes).hexdigest()
@@ -59,7 +60,7 @@ class EvaluationService:
             dataset_name=dataset_name,
             dataset_sha256=dataset_sha256,
             total_cases=len(rows),
-            run_config=self._run_config,
+            run_config=run_config or self._run_config,
         )
         await self._repository.create_cases(run_id=run.id, rows=rows)
         await self._repository.commit()

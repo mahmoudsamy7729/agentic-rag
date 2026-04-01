@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from src.rag.embeddings.interface import EmbeddingProvider
-from src.rag.ingestion.chunker import chunk_text
+from src.rag.ingestion.chunker import ChunkingStrategyRegistry
 from src.rag.ingestion.pdf_extractor import PDFExtractor
 from src.rag.models import RetrievedChunk
 from src.rag.reranker import Reranker
@@ -15,6 +15,9 @@ from src.rag.vectorstore.interface import VectorStore
 class IngestionResult:
     doc_id: str
     chunks_ingested: int
+    chunking_strategy: str
+    chunk_size: int
+    chunk_overlap: int
 
 
 @dataclass(slots=True)
@@ -25,6 +28,9 @@ class PDFIngestionResult:
     pages_ingested: int
     skipped_pages: list[int]
     warnings: list[str]
+    chunking_strategy: str
+    chunk_size: int
+    chunk_overlap: int
 
 
 class RAGIngestionService:
@@ -33,6 +39,8 @@ class RAGIngestionService:
         *,
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,
+        chunking_registry: ChunkingStrategyRegistry,
+        default_chunking_strategy: str,
         chunk_size: int,
         chunk_overlap: int,
         pdf_extractor: PDFExtractor | None = None,
@@ -40,6 +48,8 @@ class RAGIngestionService:
     ) -> None:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
+        self._chunking_registry = chunking_registry
+        self._default_chunking_strategy = default_chunking_strategy
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
         self._pdf_extractor = pdf_extractor
@@ -51,11 +61,14 @@ class RAGIngestionService:
         text: str,
         source: str | None = None,
         doc_id: str | None = None,
+        chunking_strategy: str | None = None,
     ) -> IngestionResult:
         resolved_doc_id = doc_id or str(uuid4())
         resolved_source = source or "inline-text"
+        resolved_strategy_name = chunking_strategy or self._default_chunking_strategy
+        strategy = self._chunking_registry.resolve(resolved_strategy_name)
 
-        chunks = chunk_text(
+        chunks = strategy.chunk(
             text=text,
             doc_id=resolved_doc_id,
             source=resolved_source,
@@ -70,6 +83,9 @@ class RAGIngestionService:
         return IngestionResult(
             doc_id=resolved_doc_id,
             chunks_ingested=len(chunks),
+            chunking_strategy=strategy.name,
+            chunk_size=self._chunk_size,
+            chunk_overlap=self._chunk_overlap,
         )
 
     async def ingest_pdf(
@@ -78,12 +94,15 @@ class RAGIngestionService:
         pdf_bytes: bytes,
         source: str | None = None,
         doc_id: str | None = None,
+        chunking_strategy: str | None = None,
     ) -> PDFIngestionResult:
         if self._pdf_extractor is None:
             raise RuntimeError("PDF extractor is not configured.")
 
         resolved_doc_id = doc_id or str(uuid4())
         resolved_source = source or "uploaded-pdf"
+        resolved_strategy_name = chunking_strategy or self._default_chunking_strategy
+        strategy = self._chunking_registry.resolve(resolved_strategy_name)
         extraction = await self._pdf_extractor.extract(
             pdf_bytes=pdf_bytes,
             max_pages=self._pdf_max_pages,
@@ -95,7 +114,7 @@ class RAGIngestionService:
         chunks = []
         global_index = 0
         for segment in extraction.segments:
-            segment_chunks = chunk_text(
+            segment_chunks = strategy.chunk(
                 text=segment.text,
                 doc_id=resolved_doc_id,
                 source=resolved_source,
@@ -123,6 +142,9 @@ class RAGIngestionService:
             pages_ingested=extraction.pages_ingested,
             skipped_pages=extraction.skipped_pages,
             warnings=extraction.warnings,
+            chunking_strategy=strategy.name,
+            chunk_size=self._chunk_size,
+            chunk_overlap=self._chunk_overlap,
         )
 
 

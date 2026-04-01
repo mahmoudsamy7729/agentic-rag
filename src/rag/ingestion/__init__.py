@@ -1,4 +1,9 @@
-from src.rag.ingestion.chunker import chunk_text
+from src.rag.ingestion.chunker import (
+    ChunkingStrategy,
+    ChunkingStrategyRegistry,
+    FixedWindowChunkingStrategy,
+    chunk_text,
+)
 from src.rag.ingestion.pdf_extractor import (
     PDFExtractionResult,
     PDFExtractor,
@@ -12,4 +17,7 @@ __all__ = [
     "PDFExtractor",
     "PDFPlumberExtractor",
     "PDFSegment",
+    "ChunkingStrategy",
+    "ChunkingStrategyRegistry",
+    "FixedWindowChunkingStrategy",
 ]
