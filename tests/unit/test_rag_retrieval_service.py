@@ -111,6 +111,7 @@ def test_retrieval_raises_after_retry_exhausted():
 
     with pytest.raises(RuntimeError, match="Reranker failed"):
         asyncio.run(service.retrieve(query="refund policy"))
+    assert reranker.calls == 2
 
 
 def test_retrieval_without_reranker_returns_base_results_truncated():

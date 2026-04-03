@@ -149,6 +149,9 @@ class RAGIngestionService:
 
 
 class RAGRetrievalService:
+    RERANK_MAX_ATTEMPTS = 2
+    RERANK_EXHAUSTED_ERROR = "Reranker failed after one retry."
+
     def __init__(
         self,
         *,
@@ -187,8 +190,7 @@ class RAGRetrievalService:
         if self._reranker is None:
             return candidates[:final_k]
 
-        attempts = 2
-        for attempt in range(1, attempts + 1):
+        for attempt in range(1, self.RERANK_MAX_ATTEMPTS + 1):
             try:
                 reranked = await self._reranker.rerank(
                     query=query,
@@ -197,7 +199,7 @@ class RAGRetrievalService:
                 )
                 return reranked[:final_k]
             except Exception as exc:
-                if attempt >= attempts:
-                    raise RuntimeError("Reranker failed after one retry.") from exc
+                if attempt >= self.RERANK_MAX_ATTEMPTS:
+                    raise RuntimeError(self.RERANK_EXHAUSTED_ERROR) from exc
 
-        return candidates[:final_k]
+        raise RuntimeError(self.RERANK_EXHAUSTED_ERROR)
