@@ -11,6 +11,7 @@ class FakeRetrievalService:
     def __init__(self) -> None:
         self.last_top_k: int | None = None
         self.last_doc_id: str | None = None
+        self.last_trace_context = None
 
     async def retrieve(
         self,
@@ -18,9 +19,11 @@ class FakeRetrievalService:
         query: str,
         top_k: int | None = None,
         doc_id: str | None = None,
+        trace_context=None,
     ):
         self.last_top_k = top_k
         self.last_doc_id = doc_id
+        self.last_trace_context = trace_context
         return [
             RetrievedChunk(
                 doc_id="doc-1",
@@ -40,6 +43,7 @@ class FailingRetrievalService:
         query: str,
         top_k: int | None = None,
         doc_id: str | None = None,
+        trace_context=None,
     ):
         raise RuntimeError("Reranker failed after one retry.")
 
@@ -51,7 +55,7 @@ def test_retriever_tool_returns_structured_results():
         tool = RetrieverTool(retrieval_service=retrieval_service, default_top_k=4)
         return await tool.run(
             {"query": "refund policy"},
-            context=ToolContext(doc_id="doc-1"),
+            context=ToolContext(doc_id="doc-1", request_id="req-tool"),
         )
 
     result = asyncio.run(_run())
@@ -65,6 +69,7 @@ def test_retriever_tool_returns_structured_results():
     assert result.output["results"][0]["page_number"] == 3
     assert retrieval_service.last_top_k == 4
     assert retrieval_service.last_doc_id == "doc-1"
+    assert retrieval_service.last_trace_context.request_id == "req-tool"
 
 
 def test_retriever_tool_requires_doc_id_in_context():

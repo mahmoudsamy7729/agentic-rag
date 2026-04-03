@@ -119,7 +119,14 @@ class FakeRetrievalService:
     def __init__(self, store: InMemoryRAGStore) -> None:
         self._store = store
 
-    async def retrieve(self, *, query: str, top_k: int | None = None, doc_id: str | None = None):
+    async def retrieve(
+        self,
+        *,
+        query: str,
+        top_k: int | None = None,
+        doc_id: str | None = None,
+        trace_context=None,
+    ):
         lowered_query = query.lower()
         hits = [
             item
@@ -142,7 +149,14 @@ class FakeRetrievalService:
 
 
 class FailingRetrievalService:
-    async def retrieve(self, *, query: str, top_k: int | None = None, doc_id: str | None = None):
+    async def retrieve(
+        self,
+        *,
+        query: str,
+        top_k: int | None = None,
+        doc_id: str | None = None,
+        trace_context=None,
+    ):
         raise RuntimeError("Reranker failed after one retry.")
 
 
@@ -219,6 +233,7 @@ class FakeNoAnswerAgentService:
         doc_id: str,
         session_id: str | None = None,
         user_id: str | None = None,
+        request_id: str | None = None,
     ) -> AgentResult:
         return AgentResult(
             answer="I could not find the answer in the provided documents.",

@@ -69,6 +69,7 @@ class AgentService:
         doc_id: str,
         session_id: str | None = None,
         user_id: str | None = None,
+        request_id: str | None = None,
     ) -> AgentResult:
         messages: list[ChatMessage] = [
             ChatMessage(
@@ -116,7 +117,12 @@ class AgentService:
             for tool_call in response.tool_calls:
                 tool_result = await self._registry.execute_tool_call(
                     tool_call,
-                    context=ToolContext(session_id=session_id, user_id=user_id, doc_id=doc_id),
+                    context=ToolContext(
+                        session_id=session_id,
+                        user_id=user_id,
+                        doc_id=doc_id,
+                        request_id=request_id,
+                    ),
                 )
                 tools_used.append(tool_call.name)
 

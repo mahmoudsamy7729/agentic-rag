@@ -1,9 +1,12 @@
 import asyncio
+import json
+import logging
 
 import pytest
 
 from src.rag.models import RetrievedChunk
 from src.rag.pipeline.services import RAGRetrievalService
+from src.shared.tracing import TRACE_LOGGER_NAME, TraceContext
 
 
 class FakeEmbeddingProvider:
@@ -56,7 +59,16 @@ def _candidates() -> list[RetrievedChunk]:
     ]
 
 
-def test_retrieval_uses_prefetch_and_reranks_to_final_top_k():
+def _trace_events(caplog) -> list[dict]:
+    return [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == TRACE_LOGGER_NAME
+    ]
+
+
+def test_retrieval_uses_prefetch_and_reranks_to_final_top_k(caplog):
+    caplog.set_level(logging.INFO, logger=TRACE_LOGGER_NAME)
     candidates = _candidates()
     vector_store = FakeVectorStore(candidates)
     reranker = FlakyReranker(fail_times=0, response=list(reversed(candidates)))
@@ -69,15 +81,31 @@ def test_retrieval_uses_prefetch_and_reranks_to_final_top_k():
         reranker=reranker,
     )
 
-    result = asyncio.run(service.retrieve(query="refund policy", doc_id="doc-2"))
+    result = asyncio.run(
+        service.retrieve(
+            query="refund policy",
+            doc_id="doc-2",
+            trace_context=TraceContext(request_id="req-1", doc_id="doc-2"),
+        )
+    )
 
     assert vector_store.last_top_k == 50
     assert vector_store.last_doc_id == "doc-2"
     assert reranker.last_top_n == 5
     assert len(result) == 5
+    events = _trace_events(caplog)
+    assert [event["event"] for event in events] == [
+        "retrieval.started",
+        "retrieval.vector_search.completed",
+        "retrieval.rerank.succeeded",
+        "retrieval.completed",
+    ]
+    assert events[2]["reranker_status"] == "succeeded_first_try"
+    assert events[3]["request_id"] == "req-1"
 
 
-def test_retrieval_retries_reranker_once_then_succeeds():
+def test_retrieval_retries_reranker_once_then_succeeds(caplog):
+    caplog.set_level(logging.INFO, logger=TRACE_LOGGER_NAME)
     candidates = _candidates()
     vector_store = FakeVectorStore(candidates)
     reranker = FlakyReranker(fail_times=1, response=candidates)
@@ -90,13 +118,29 @@ def test_retrieval_retries_reranker_once_then_succeeds():
         reranker=reranker,
     )
 
-    result = asyncio.run(service.retrieve(query="refund policy"))
+    result = asyncio.run(
+        service.retrieve(
+            query="refund policy",
+            trace_context=TraceContext(request_id="req-2", doc_id="doc-1"),
+        )
+    )
 
     assert reranker.calls == 2
     assert len(result) == 5
+    events = _trace_events(caplog)
+    assert [event["event"] for event in events] == [
+        "retrieval.started",
+        "retrieval.vector_search.completed",
+        "retrieval.rerank.retry",
+        "retrieval.rerank.succeeded",
+        "retrieval.completed",
+    ]
+    assert events[3]["reranker_status"] == "succeeded_on_retry"
+    assert events[3]["reranker_attempt_count"] == 2
 
 
-def test_retrieval_raises_after_retry_exhausted():
+def test_retrieval_raises_after_retry_exhausted(caplog):
+    caplog.set_level(logging.INFO, logger=TRACE_LOGGER_NAME)
     candidates = _candidates()
     vector_store = FakeVectorStore(candidates)
     reranker = FlakyReranker(fail_times=2, response=candidates)
@@ -110,11 +154,26 @@ def test_retrieval_raises_after_retry_exhausted():
     )
 
     with pytest.raises(RuntimeError, match="Reranker failed"):
-        asyncio.run(service.retrieve(query="refund policy"))
+        asyncio.run(
+            service.retrieve(
+                query="refund policy",
+                trace_context=TraceContext(request_id="req-3", doc_id="doc-1"),
+            )
+        )
     assert reranker.calls == 2
+    events = _trace_events(caplog)
+    assert [event["event"] for event in events] == [
+        "retrieval.started",
+        "retrieval.vector_search.completed",
+        "retrieval.rerank.retry",
+        "retrieval.rerank.failed",
+    ]
+    assert events[-1]["reranker_status"] == "failed"
+    assert events[-1]["request_id"] == "req-3"
 
 
-def test_retrieval_without_reranker_returns_base_results_truncated():
+def test_retrieval_without_reranker_returns_base_results_truncated(caplog):
+    caplog.set_level(logging.INFO, logger=TRACE_LOGGER_NAME)
     candidates = _candidates()
     vector_store = FakeVectorStore(candidates)
 
@@ -126,9 +185,23 @@ def test_retrieval_without_reranker_returns_base_results_truncated():
         reranker=None,
     )
 
-    result = asyncio.run(service.retrieve(query="refund policy", top_k=3, doc_id="doc-2"))
+    result = asyncio.run(
+        service.retrieve(
+            query="refund policy",
+            top_k=3,
+            doc_id="doc-2",
+            trace_context=TraceContext(request_id="req-4", doc_id="doc-2"),
+        )
+    )
 
     assert vector_store.last_top_k == 50
     assert vector_store.last_doc_id == "doc-2"
     assert len(result) == 2
     assert [item.doc_id for item in result] == ["doc-2", "doc-2"]
+    events = _trace_events(caplog)
+    assert [event["event"] for event in events] == [
+        "retrieval.started",
+        "retrieval.vector_search.completed",
+        "retrieval.completed",
+    ]
+    assert events[-1]["reranker_status"] == "disabled"

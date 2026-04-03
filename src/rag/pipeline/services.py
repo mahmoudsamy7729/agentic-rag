@@ -9,6 +9,7 @@ from src.rag.ingestion.pdf_extractor import PDFExtractor
 from src.rag.models import RetrievedChunk
 from src.rag.reranker import Reranker
 from src.rag.vectorstore.interface import VectorStore
+from src.shared.tracing import TraceContext, chunk_metadata, trace_event
 
 
 @dataclass(slots=True)
@@ -173,22 +174,62 @@ class RAGRetrievalService:
         query: str,
         top_k: int | None = None,
         doc_id: str | None = None,
+        trace_context: TraceContext | None = None,
     ) -> list[RetrievedChunk]:
         final_k = top_k or self._default_top_k
         if final_k < 1:
             raise ValueError("top_k must be >= 1")
 
         candidate_k = max(self._prefetch_k, final_k)
+        trace_event(
+            "retrieval.started",
+            trace_context=trace_context,
+            query=query,
+            top_k=final_k,
+            prefetch_k=candidate_k,
+            reranker_enabled=self._reranker is not None,
+            reranker_model=(
+                getattr(self._reranker, "model_name", None)
+                if self._reranker is not None
+                else None
+            ),
+        )
         query_embedding = await self._embedding_provider.embed_query(query)
         candidates = await self._vector_store.similarity_search(
             query_embedding=query_embedding,
             top_k=candidate_k,
             doc_id=doc_id,
         )
+        trace_event(
+            "retrieval.vector_search.completed",
+            trace_context=trace_context,
+            query=query,
+            top_k=final_k,
+            prefetch_k=candidate_k,
+            candidate_count=len(candidates),
+            candidates=chunk_metadata(candidates),
+        )
         if not candidates:
+            trace_event(
+                "retrieval.completed",
+                trace_context=trace_context,
+                query=query,
+                returned_count=0,
+                reranker_status="disabled" if self._reranker is None else None,
+                results=[],
+            )
             return []
         if self._reranker is None:
-            return candidates[:final_k]
+            results = candidates[:final_k]
+            trace_event(
+                "retrieval.completed",
+                trace_context=trace_context,
+                query=query,
+                returned_count=len(results),
+                reranker_status="disabled",
+                results=chunk_metadata(results),
+            )
+            return results
 
         for attempt in range(1, self.RERANK_MAX_ATTEMPTS + 1):
             try:
@@ -197,9 +238,45 @@ class RAGRetrievalService:
                     chunks=candidates,
                     top_n=final_k,
                 )
-                return reranked[:final_k]
+                results = reranked[:final_k]
+                reranker_status = (
+                    "succeeded_first_try" if attempt == 1 else "succeeded_on_retry"
+                )
+                trace_event(
+                    "retrieval.rerank.succeeded",
+                    trace_context=trace_context,
+                    query=query,
+                    reranker_status=reranker_status,
+                    reranker_attempt_count=attempt,
+                    returned_count=len(results),
+                    results=chunk_metadata(results),
+                )
+                trace_event(
+                    "retrieval.completed",
+                    trace_context=trace_context,
+                    query=query,
+                    returned_count=len(results),
+                    reranker_status=reranker_status,
+                    results=chunk_metadata(results),
+                )
+                return results
             except Exception as exc:
                 if attempt >= self.RERANK_MAX_ATTEMPTS:
+                    trace_event(
+                        "retrieval.rerank.failed",
+                        trace_context=trace_context,
+                        query=query,
+                        reranker_status="failed",
+                        reranker_attempt_count=attempt,
+                        error=str(exc),
+                    )
                     raise RuntimeError(self.RERANK_EXHAUSTED_ERROR) from exc
+                trace_event(
+                    "retrieval.rerank.retry",
+                    trace_context=trace_context,
+                    query=query,
+                    reranker_attempt_count=attempt,
+                    error=str(exc),
+                )
 
         raise RuntimeError(self.RERANK_EXHAUSTED_ERROR)

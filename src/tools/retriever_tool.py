@@ -4,6 +4,7 @@ from typing import Any
 
 from src.rag.pipeline import RAGRetrievalService
 from src.shared.interfaces.tool import Tool, ToolContext, ToolExecutionResult
+from src.shared.tracing import TraceContext
 
 
 class RetrieverTool(Tool):
@@ -46,10 +47,20 @@ class RetrieverTool(Tool):
         if not doc_id:
             return ToolExecutionResult(success=False, error="Missing required context: doc_id")
 
+        trace_context = None
+        if context is not None and context.request_id:
+            trace_context = TraceContext(
+                request_id=context.request_id,
+                doc_id=doc_id,
+                owner_user_id=context.user_id,
+                session_id=context.session_id,
+            )
+
         chunks = await self._retrieval_service.retrieve(
             query=query,
             top_k=self._default_top_k,
             doc_id=doc_id,
+            trace_context=trace_context,
         )
         return ToolExecutionResult(
             success=True,

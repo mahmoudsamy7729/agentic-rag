@@ -23,6 +23,10 @@ class CohereReranker(Reranker):
         self._api_key = api_key
         self._model = model
 
+    @property
+    def model_name(self) -> str:
+        return self._model
+
     async def rerank(
         self,
         *,

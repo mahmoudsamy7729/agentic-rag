@@ -8,6 +8,7 @@ from src.agents.service import AgentService
 from src.modules.documents.repository import DocumentsRepository
 from src.modules.semantic_cache.service import SemanticCacheService
 from src.rag.embeddings import EmbeddingProvider
+from src.shared.tracing import TraceContext, trace_event
 from src.shared.interfaces.llm import LLM
 
 from .query_refinement import QueryRefinementService
@@ -54,7 +55,14 @@ class AgentAskPipeline:
         doc_id: str,
         session_id: str | None = None,
         use_cache: bool = True,
+        request_id: str | None = None,
     ) -> AgentAskPipelineResult:
+        trace_context = TraceContext(
+            request_id=request_id or "unknown",
+            doc_id=doc_id,
+            owner_user_id=str(owner_user_id),
+            session_id=session_id,
+        )
         document = await self._documents_repository.get_owned_document(
             owner_user_id=owner_user_id,
             doc_id=doc_id,
@@ -62,12 +70,24 @@ class AgentAskPipeline:
         )
         if document is None:
             raise DocumentNotFoundError("Document not found.")
+        trace_event(
+            "ask.document.checked",
+            trace_context=trace_context,
+            document_found=True,
+            use_cache=use_cache,
+        )
 
         refinement = await self._query_refinement_service.refine(
             question=question,
             doc_id=doc_id,
         )
         refined_query = refinement.refined_query
+        trace_event(
+            "ask.query.refined",
+            trace_context=trace_context,
+            question=question,
+            refined_query=refined_query,
+        )
         normalized_question = self._semantic_cache_service.normalize_question(refined_query)
         query_embedding: list[float] | None = None
 
@@ -77,6 +97,14 @@ class AgentAskPipeline:
             and document.last_indexed_at is not None
         )
         if should_use_cache:
+            trace_event(
+                "ask.cache.lookup.started",
+                trace_context=trace_context,
+                question=question,
+                refined_query=refined_query,
+                cache_enabled=self._semantic_cache_service.enabled,
+                use_cache=use_cache,
+            )
             try:
                 query_embedding = await self._embedding_provider.embed_query(normalized_question)
                 cache_hit = await self._semantic_cache_service.lookup(
@@ -87,6 +115,13 @@ class AgentAskPipeline:
                     query_embedding=query_embedding,
                 )
                 if cache_hit is not None:
+                    trace_event(
+                        "ask.cache.hit",
+                        trace_context=trace_context,
+                        cache_status="hit",
+                        refined_query=refined_query,
+                        citation_count=len(cache_hit.citations),
+                    )
                     return AgentAskPipelineResult(
                         status="ok",
                         cache_status="hit",
@@ -96,15 +131,33 @@ class AgentAskPipeline:
                         tools_used=[],
                         citations=cache_hit.citations,
                     )
+                trace_event(
+                    "ask.cache.miss",
+                    trace_context=trace_context,
+                    cache_status="miss",
+                    refined_query=refined_query,
+                )
             except Exception:
+                trace_event(
+                    "ask.cache.lookup.failed",
+                    trace_context=trace_context,
+                    cache_status="miss",
+                    refined_query=refined_query,
+                )
                 # Cache failures should never block generation.
                 pass
 
+        trace_event(
+            "ask.agent.run.started",
+            trace_context=trace_context,
+            refined_query=refined_query,
+        )
         result = await self._agent_service.run(
             question=refined_query,
             doc_id=doc_id,
             session_id=session_id,
             user_id=str(owner_user_id),
+            request_id=request_id,
         )
         citations = [
             {
@@ -116,6 +169,15 @@ class AgentAskPipeline:
             }
             for citation in result.citations
         ]
+        trace_event(
+            "ask.agent.run.completed",
+            trace_context=trace_context,
+            refined_query=refined_query,
+            answer_status=result.status,
+            tool_count=len(result.tools_used),
+            citation_count=len(citations),
+            no_answer_fallback=is_no_answer_fallback(result.answer),
+        )
 
         if should_use_cache:
             is_rag_backed = is_cacheable_rag_answer(
@@ -139,9 +201,31 @@ class AgentAskPipeline:
                         answer=result.answer,
                         citations=citations,
                     )
+                    trace_event(
+                        "ask.cache.store.succeeded",
+                        trace_context=trace_context,
+                        cache_status="miss",
+                        refined_query=refined_query,
+                        citation_count=len(citations),
+                    )
                 except Exception:
+                    trace_event(
+                        "ask.cache.store.failed",
+                        trace_context=trace_context,
+                        cache_status="miss",
+                        refined_query=refined_query,
+                    )
                     # Cache failures should never block generation.
                     pass
+            else:
+                trace_event(
+                    "ask.cache.store.skipped",
+                    trace_context=trace_context,
+                    cache_status="miss",
+                    refined_query=refined_query,
+                    is_rag_backed=is_rag_backed,
+                    no_answer_fallback=should_skip_cache,
+                )
 
         return AgentAskPipelineResult(
             status=result.status,

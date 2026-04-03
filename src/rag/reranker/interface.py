@@ -6,6 +6,10 @@ from src.rag.models import RetrievedChunk
 
 
 class Reranker(ABC):
+    @property
+    def model_name(self) -> str | None:
+        return None
+
     @abstractmethod
     async def rerank(
         self,
