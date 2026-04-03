@@ -211,16 +211,28 @@ class EvaluationService:
                     await self._repository.increment_progress(run=run)
                     await self._repository.commit()
 
-            await self._repository.complete_run(
-                run=run,
-                hit_at_k=self._avg([1.0 if m.hit else 0.0 for m in retrieval_metrics]),
-                recall_at_k=self._avg([m.recall for m in retrieval_metrics]),
-                mrr=self._avg([m.reciprocal_rank for m in retrieval_metrics]),
-                accuracy_avg=self._avg([float(score.accuracy) for score in judge_scores]),
-                completeness_avg=self._avg([float(score.completeness) for score in judge_scores]),
-                relevance_avg=self._avg([float(score.relevance) for score in judge_scores]),
-                groundedness_avg=self._avg([float(score.groundedness) for score in judge_scores]),
-            )
+            failed_count = sum(1 for case in cases if case.status == "failed")
+            aggregate_kwargs = {
+                "hit_at_k": self._avg([1.0 if m.hit else 0.0 for m in retrieval_metrics]),
+                "recall_at_k": self._avg([m.recall for m in retrieval_metrics]),
+                "mrr": self._avg([m.reciprocal_rank for m in retrieval_metrics]),
+                "accuracy_avg": self._avg([float(score.accuracy) for score in judge_scores]),
+                "completeness_avg": self._avg([float(score.completeness) for score in judge_scores]),
+                "relevance_avg": self._avg([float(score.relevance) for score in judge_scores]),
+                "groundedness_avg": self._avg([float(score.groundedness) for score in judge_scores]),
+            }
+            if failed_count == 0:
+                await self._repository.complete_run(
+                    run=run,
+                    **aggregate_kwargs,
+                )
+            else:
+                await self._repository.set_run_with_aggregates(
+                    run=run,
+                    status="failed",
+                    error_message=f"{failed_count} case(s) failed during evaluation.",
+                    **aggregate_kwargs,
+                )
             await self._repository.commit()
         except Exception as exc:
             await self._repository.rollback()

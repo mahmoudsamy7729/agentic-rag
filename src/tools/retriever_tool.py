@@ -46,17 +46,11 @@ class RetrieverTool(Tool):
         if not doc_id:
             return ToolExecutionResult(success=False, error="Missing required context: doc_id")
 
-        try:
-            chunks = await self._retrieval_service.retrieve(
-                query=query,
-                top_k=self._default_top_k,
-                doc_id=doc_id,
-            )
-        except Exception as exc:
-            return ToolExecutionResult(
-                success=False,
-                error=f"Retrieval failed: {exc}",
-            )
+        chunks = await self._retrieval_service.retrieve(
+            query=query,
+            top_k=self._default_top_k,
+            doc_id=doc_id,
+        )
         return ToolExecutionResult(
             success=True,
             output={

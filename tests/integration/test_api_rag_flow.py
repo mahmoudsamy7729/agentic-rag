@@ -141,6 +141,11 @@ class FakeRetrievalService:
         ]
 
 
+class FailingRetrievalService:
+    async def retrieve(self, *, query: str, top_k: int | None = None, doc_id: str | None = None):
+        raise RuntimeError("Reranker failed after one retry.")
+
+
 class FakeLLM(LLM):
     @property
     def model_name(self) -> str:
@@ -423,10 +428,14 @@ class FakeDocumentsRepository:
         return None
 
 
-def _build_client():
+def _build_client(
+    *,
+    retrieval_service=None,
+    raise_server_exceptions: bool = True,
+):
     store = InMemoryRAGStore()
     ingestion_service = FakeIngestionService(store)
-    retrieval_service = FakeRetrievalService(store)
+    retrieval_service = retrieval_service or FakeRetrievalService(store)
     docs_repo = FakeDocumentsRepository()
     owner = FakeUser(id=uuid4())
     embedding_provider = FakeEmbeddingProvider()
@@ -455,7 +464,7 @@ def _build_client():
         max_steps=4,
     )
 
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_end_to_end_rag_flow_with_doc_scoped_citations():
@@ -729,6 +738,35 @@ def test_ingest_empty_text_returns_422():
             json={"text": "", "source": "invalid"},
         )
         assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_agent_ask_returns_server_error_when_reranker_retry_is_exhausted():
+    client = _build_client(
+        retrieval_service=FailingRetrievalService(),
+        raise_server_exceptions=False,
+    )
+    try:
+        ingest = client.post(
+            "/rag/ingest/text",
+            json={
+                "text": "Paris is the capital of France.",
+                "source": "wiki-france",
+                "doc_id": "doc-reranker-fail",
+            },
+        )
+        assert ingest.status_code == 200
+
+        response = client.post(
+            "/agent/ask",
+            json={
+                "question": "What is the capital?",
+                "doc_id": "doc-reranker-fail",
+                "session_id": "s-1",
+            },
+        )
+        assert response.status_code == 500
     finally:
         app.dependency_overrides.clear()
 
