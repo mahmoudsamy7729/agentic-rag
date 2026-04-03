@@ -74,6 +74,37 @@ class ChromaVectorStore(VectorStore):
             )
         return results
 
+    async def list_chunks(self, *, doc_id: str) -> list[RAGChunk]:
+        if not doc_id:
+            return []
+
+        response = self._collection.get(
+            where={"doc_id": doc_id},
+            include=["documents", "metadatas"],
+        )
+        ids = response.get("ids", []) or []
+        documents = response.get("documents", []) or []
+        metadatas = response.get("metadatas", []) or []
+
+        chunks: list[RAGChunk] = []
+        for raw_id, document, metadata in zip(ids, documents, metadatas):
+            chunk_id = str((metadata or {}).get("chunk_id", "")) or str(raw_id).split(":", 1)[-1]
+            chunks.append(
+                RAGChunk(
+                    doc_id=str((metadata or {}).get("doc_id", doc_id)),
+                    chunk_id=chunk_id,
+                    source=str((metadata or {}).get("source", "unknown")),
+                    text=str(document),
+                    page_number=self._parse_page_number(metadata or {}),
+                    chunking_strategy=self._parse_optional_string(metadata or {}, "chunking_strategy"),
+                    chunk_size=self._parse_optional_int((metadata or {}).get("chunk_size")),
+                    chunk_overlap=self._parse_optional_int((metadata or {}).get("chunk_overlap")),
+                )
+            )
+
+        chunks.sort(key=self._chunk_sort_key)
+        return chunks
+
     async def delete_by_doc_id(self, *, doc_id: str) -> None:
         if not doc_id:
             return
@@ -99,9 +130,28 @@ class ChromaVectorStore(VectorStore):
     @staticmethod
     def _parse_page_number(metadata: dict[str, str | int]) -> int | None:
         raw = metadata.get("page_number")
+        return ChromaVectorStore._parse_optional_int(raw)
+
+    @staticmethod
+    def _parse_optional_int(raw: str | int | None) -> int | None:
         if raw is None:
             return None
         try:
             return int(raw)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _parse_optional_string(metadata: dict[str, str | int], key: str) -> str | None:
+        raw = metadata.get(key)
+        if raw is None:
+            return None
+        value = str(raw).strip()
+        return value or None
+
+    @staticmethod
+    def _chunk_sort_key(chunk: RAGChunk) -> tuple[int, str]:
+        parts = chunk.chunk_id.rsplit("-", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            return (int(parts[1]), chunk.chunk_id)
+        return (2**31 - 1, chunk.chunk_id)

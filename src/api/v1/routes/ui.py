@@ -40,3 +40,14 @@ async def documents_ui(request: Request):
             "default_chunking_strategy": settings.default_chunking_strategy,
         },
     )
+
+
+@router.get("/documents/{doc_id}/chunks-ui", response_class=HTMLResponse, include_in_schema=False)
+async def document_chunks_ui(request: Request, doc_id: str):
+    return templates.TemplateResponse(
+        "document_chunks_ui.html",
+        {
+            "request": request,
+            "doc_id": doc_id,
+        },
+    )

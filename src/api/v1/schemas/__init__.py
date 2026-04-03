@@ -1,5 +1,8 @@
 from src.api.v1.schemas.agent import AgentAskRequest, AgentAskResponse, AgentCitation
 from src.api.v1.schemas.documents import (
+    DocumentChunkItem,
+    DocumentChunkListResponse,
+    DocumentChunkSummary,
     DocumentDeleteResponse,
     DocumentItem,
     DocumentListResponse,
@@ -25,6 +28,9 @@ __all__ = [
     "AgentAskRequest",
     "AgentAskResponse",
     "AgentCitation",
+    "DocumentChunkItem",
+    "DocumentChunkListResponse",
+    "DocumentChunkSummary",
     "DocumentDeleteResponse",
     "DocumentItem",
     "DocumentListResponse",

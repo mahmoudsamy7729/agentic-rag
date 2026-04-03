@@ -33,7 +33,30 @@ class InMemoryRAGStore:
 
 
 class FakeVectorStore:
+    def __init__(self, store: InMemoryRAGStore) -> None:
+        self._store = store
+
+    async def list_chunks(self, *, doc_id: str):
+        items = [item for item in self._store.items if item["doc_id"] == doc_id]
+        items.sort(key=lambda item: int(str(item["chunk_id"]).split("-", 1)[1]))
+        from src.rag.models import RAGChunk
+
+        return [
+            RAGChunk(
+                doc_id=item["doc_id"],
+                chunk_id=item["chunk_id"],
+                source=item["source"],
+                text=item["text"],
+                page_number=item.get("page_number"),
+                chunking_strategy=item.get("chunking_strategy"),
+                chunk_size=item.get("chunk_size"),
+                chunk_overlap=item.get("chunk_overlap"),
+            )
+            for item in items
+        ]
+
     async def delete_by_doc_id(self, *, doc_id: str) -> None:
+        self._store.items = [item for item in self._store.items if item["doc_id"] != doc_id]
         return None
 
 
@@ -50,9 +73,18 @@ class FakeIngestionService:
                 "source": source or "inline-text",
                 "text": text,
                 "page_number": None,
+                "chunking_strategy": "fixed_window",
+                "chunk_size": 800,
+                "chunk_overlap": 120,
             }
         )
-        return IngestionResult(doc_id=resolved_doc_id, chunks_ingested=1)
+        return IngestionResult(
+            doc_id=resolved_doc_id,
+            chunks_ingested=1,
+            chunking_strategy="fixed_window",
+            chunk_size=800,
+            chunk_overlap=120,
+        )
 
     async def ingest_pdf(self, *, pdf_bytes: bytes, source: str | None = None, doc_id: str | None = None):
         if not pdf_bytes:
@@ -65,6 +97,9 @@ class FakeIngestionService:
                 "source": source or "uploaded-pdf",
                 "text": "Refund rules for digital products are 7 days.",
                 "page_number": 1,
+                "chunking_strategy": "fixed_window",
+                "chunk_size": 800,
+                "chunk_overlap": 120,
             }
         )
         return PDFIngestionResult(
@@ -74,6 +109,9 @@ class FakeIngestionService:
             pages_ingested=1,
             skipped_pages=[2],
             warnings=["Page 2: no extractable text or tables."],
+            chunking_strategy="fixed_window",
+            chunk_size=800,
+            chunk_overlap=120,
         )
 
 
@@ -408,7 +446,7 @@ def _build_client():
     app.dependency_overrides[deps.get_query_refinement_service] = lambda: query_refinement_service
     app.dependency_overrides[deps.get_embedding_provider] = lambda: embedding_provider
     app.dependency_overrides[deps.get_semantic_cache_service] = lambda: semantic_cache_service
-    app.dependency_overrides[deps.get_vector_store] = lambda: FakeVectorStore()
+    app.dependency_overrides[deps.get_vector_store] = lambda: FakeVectorStore(store)
     app.dependency_overrides[get_documents_repository] = lambda: docs_repo
     app.dependency_overrides[active_user] = lambda: owner
     app.dependency_overrides[deps.get_agent_service] = lambda: AgentService(
@@ -614,6 +652,38 @@ def test_documents_routes_soft_delete_and_agent_ownership_enforcement():
             json={"question": "hello?", "doc_id": "doc-owned", "session_id": "s-1"},
         )
         assert ask_after.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_document_chunks_route_and_ui():
+    client = _build_client()
+    try:
+        ingest = client.post(
+            "/rag/ingest/pdf",
+            files={"file": ("policy.pdf", b"%PDF-sample", "application/pdf")},
+            data={"source": "policy-pdf", "doc_id": "doc-chunks"},
+        )
+        assert ingest.status_code == 200
+
+        chunks = client.get("/documents/doc-chunks/chunks")
+        assert chunks.status_code == 200
+        body = chunks.json()
+        assert body["status"] == "ok"
+        assert body["document"]["doc_id"] == "doc-chunks"
+        assert body["document"]["chunking_strategy"] == "fixed_window"
+        assert body["total"] == 1
+        assert body["items"][0]["chunk_id"] == "chunk-0"
+        assert body["items"][0]["page_number"] == 1
+
+        filtered = client.get("/documents/doc-chunks/chunks?page_number=1&q=refund")
+        assert filtered.status_code == 200
+        filtered_body = filtered.json()
+        assert filtered_body["total"] == 1
+
+        ui = client.get("/documents/doc-chunks/chunks-ui")
+        assert ui.status_code == 200
+        assert "Document Chunks" in ui.text
     finally:
         app.dependency_overrides.clear()
 
