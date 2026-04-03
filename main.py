@@ -12,6 +12,7 @@ from src.api.v1.routes.rag import router as rag_router
 from src.api.v1.routes.ui import router as ui_router
 from src.api.v1.routes.users import router as users_router
 from src.infrastructure.database import engine
+from src.shared.tracing import configure_trace_logging
 
 
 @asynccontextmanager
@@ -22,6 +23,7 @@ async def lifespan(_: FastAPI):
         await engine.dispose()
 
 
+configure_trace_logging()
 app = FastAPI(lifespan=lifespan)
 static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)

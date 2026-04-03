@@ -1,11 +1,15 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from src.agents.ask_pipeline import AgentAskPipeline
 from src.agents.service import AgentCitation, AgentResult
+from src.shared.tracing import TRACE_LOGGER_NAME
 
 
 @dataclass
@@ -21,7 +25,15 @@ class _DocsRepo:
 
 
 class _Agent:
-    async def run(self, *, question: str, doc_id: str, session_id: str | None = None, user_id: str | None = None):
+    async def run(
+        self,
+        *,
+        question: str,
+        doc_id: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        request_id: str | None = None,
+    ):
         return AgentResult(
             answer="answer",
             steps=1,
@@ -80,6 +92,14 @@ class _Cache:
         self.store_calls += 1
 
 
+def _trace_events(caplog) -> list[dict]:
+    return [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == TRACE_LOGGER_NAME
+    ]
+
+
 def test_ask_pipeline_use_cache_false_skips_cache_lookup_and_store():
     embed = _Embed()
     cache = _Cache()
@@ -92,7 +112,7 @@ def test_ask_pipeline_use_cache_false_skips_cache_lookup_and_store():
         documents_repository=_DocsRepo(),
     )
 
-    result = __import__("asyncio").run(
+    result = asyncio.run(
         pipeline.ask(
             owner_user_id=uuid4(),
             question="q",
@@ -106,3 +126,46 @@ def test_ask_pipeline_use_cache_false_skips_cache_lookup_and_store():
     assert cache.lookup_calls == 0
     assert cache.store_calls == 0
     assert embed.calls == 0
+
+
+def test_ask_pipeline_emits_traces_without_chunk_text(caplog):
+    caplog.set_level(logging.INFO, logger=TRACE_LOGGER_NAME)
+    embed = _Embed()
+    cache = _Cache()
+    pipeline = AgentAskPipeline(
+        agent_service=_Agent(),
+        llm=_LLM(),
+        query_refinement_service=_Refiner(),
+        embedding_provider=embed,
+        semantic_cache_service=cache,
+        documents_repository=_DocsRepo(),
+    )
+
+    result = asyncio.run(
+        pipeline.ask(
+            owner_user_id=uuid4(),
+            question="q",
+            doc_id="doc-1",
+            session_id="s1",
+            use_cache=True,
+            request_id="req-pipeline",
+        )
+    )
+
+    assert result.cache_status == "miss"
+    events = _trace_events(caplog)
+    assert [event["event"] for event in events] == [
+        "ask.document.checked",
+        "ask.query.refined",
+        "ask.cache.lookup.started",
+        "ask.cache.miss",
+        "ask.agent.run.started",
+        "ask.agent.run.completed",
+        "ask.cache.store.succeeded",
+    ]
+    assert all(event["request_id"] == "req-pipeline" for event in events)
+    assert events[1]["question"] == "q"
+    assert events[1]["refined_query"] == "refined q"
+    joined_logs = "\n".join(record.message for record in caplog.records)
+    assert "\"snippet\"" not in joined_logs
+    assert "\"answer\"" not in joined_logs
