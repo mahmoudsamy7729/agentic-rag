@@ -145,3 +145,29 @@ def test_chroma_vectorstore_delete_by_doc_id():
         assert all(item.doc_id != "doc-a" for item in results)
     finally:
         shutil.rmtree(persist_dir, ignore_errors=True)
+
+
+def test_chroma_vectorstore_list_chunks_returns_stable_chunk_order():
+    persist_dir = tempfile.mkdtemp(prefix="chroma-store-", dir=".")
+    try:
+        async def _run():
+            store = ChromaVectorStore(
+                persist_dir=persist_dir,
+                collection_name="unit-test-list-chunks",
+            )
+            chunks = [
+                RAGChunk(doc_id="doc-a", chunk_id="chunk-10", source="a.txt", text="ten", page_number=2),
+                RAGChunk(doc_id="doc-a", chunk_id="chunk-2", source="a.txt", text="two", page_number=1),
+                RAGChunk(doc_id="doc-a", chunk_id="chunk-1", source="a.txt", text="one", page_number=1),
+            ]
+            embeddings = [[1.0, 0.0], [0.5, 0.5], [0.2, 0.8]]
+            await store.upsert_chunks(chunks=chunks, embeddings=embeddings)
+            return await store.list_chunks(doc_id="doc-a")
+
+        results = asyncio.run(_run())
+        assert [item.chunk_id for item in results] == ["chunk-1", "chunk-2", "chunk-10"]
+        assert results[0].text == "one"
+        assert results[1].page_number == 1
+        assert results[2].page_number == 2
+    finally:
+        shutil.rmtree(persist_dir, ignore_errors=True)

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Chunks</title>
+  <style>
+    body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111827; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 24px; }
+    .panel { background: #fff; border: 1px solid #d8dee9; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .nav button { border: 1px solid #d8dee9; border-radius: 8px; padding: 8px 10px; font-size: 13px; text-decoration: none; background: #fff; color: #111827; cursor: pointer; }
+    h1 { margin: 0; font-size: 28px; }
+    h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; color: #6b7280; }
+    .mono { font-family: Consolas, "Cascadia Code", monospace; font-size: 12px; }
+    .muted { color: #6b7280; }
+    .grid { display: grid; grid-template-columns: 1.5fr 1fr 0.9fr auto auto; gap: 10px; align-items: end; }
+    label { display: block; margin: 0 0 6px; font-size: 12px; text-transform: uppercase; color: #6b7280; }
+    input, button, select { border: 1px solid #d8dee9; border-radius: 8px; padding: 10px; font-size: 14px; box-sizing: border-box; }
+    input, select { width: 100%; }
+    button { cursor: pointer; }
+    .primary { background: #0f766e; border-color: #0f766e; color: #fff; }
+    .summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+    .metric { border: 1px solid #edf2f7; border-radius: 10px; padding: 12px; background: #fafcff; }
+    .metric .label { font-size: 11px; text-transform: uppercase; color: #6b7280; margin-bottom: 6px; }
+    .metric .value { font-weight: 600; word-break: break-word; }
+    .chunks { display: grid; gap: 12px; }
+    .chunk { border: 1px solid #d8dee9; border-radius: 10px; padding: 14px; background: #fff; }
+    .chunk-head { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .pill { border: 1px solid #d8dee9; background: #f9fafb; border-radius: 999px; padding: 4px 8px; font-size: 12px; }
+    .chunk-text { white-space: pre-wrap; line-height: 1.5; }
+    .footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="panel">
+      <div class="top">
+        <div>
+          <h1>Document Chunks</h1>
+          <div class="mono">Inspect indexed chunks for <span id="docIdLabel">{{ doc_id }}</span>.</div>
+        </div>
+        <div class="nav">
+          <a href="/documents-ui">Documents</a>
+          <a href="/ask-ui?doc_id={{ doc_id }}">Ask</a>
+          <a href="/evaluation-ui">Evaluation</a>
+          <a href="/evaluation-history-ui">History</a>
+          <button id="logoutBtn" type="button">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Chunking Config</h2>
+      <div id="summary" class="summary">
+        <div class="metric"><div class="label">Strategy</div><div class="value">-</div></div>
+        <div class="metric"><div class="label">Chunk Size</div><div class="value">-</div></div>
+        <div class="metric"><div class="label">Chunk Overlap</div><div class="value">-</div></div>
+        <div class="metric"><div class="label">Source</div><div class="value">-</div></div>
+        <div class="metric"><div class="label">Matched Chunks</div><div class="value">-</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Filters</h2>
+      <div class="grid">
+        <div>
+          <label for="searchInput">Keyword Search</label>
+          <input id="searchInput" type="text" placeholder="Search inside chunk text" />
+        </div>
+        <div>
+          <label for="pageInput">Page Number</label>
+          <input id="pageInput" type="number" min="1" placeholder="All pages" />
+        </div>
+        <div>
+          <label for="limitSelect">Page Size</label>
+          <select id="limitSelect">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <button id="applyBtn" class="primary" type="button">Apply</button>
+        <button id="resetBtn" type="button">Reset</button>
+      </div>
+      <div id="msg" class="mono" style="margin-top:12px;">Ready.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Chunks</h2>
+      <div id="chunks" class="chunks">
+        <div class="mono">Loading chunks...</div>
+      </div>
+      <div class="footer">
+        <div id="paging" class="mono">-</div>
+        <div class="actions">
+          <button id="prevBtn" type="button">Previous</button>
+          <button id="nextBtn" type="button">Next</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/ui_auth.js"></script>
+  <script>
+    const state = {
+      docId: "{{ doc_id }}",
+      limit: 20,
+      offset: 0,
+      pageNumber: null,
+      q: "",
+      total: 0,
+    };
+
+    const el = {
+      summary: document.getElementById("summary"),
+      searchInput: document.getElementById("searchInput"),
+      pageInput: document.getElementById("pageInput"),
+      limitSelect: document.getElementById("limitSelect"),
+      applyBtn: document.getElementById("applyBtn"),
+      resetBtn: document.getElementById("resetBtn"),
+      msg: document.getElementById("msg"),
+      chunks: document.getElementById("chunks"),
+      paging: document.getElementById("paging"),
+      prevBtn: document.getElementById("prevBtn"),
+      nextBtn: document.getElementById("nextBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
+    };
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function setMsg(text) {
+      el.msg.textContent = text;
+    }
+
+    function renderSummary(documentMeta, total) {
+      el.summary.innerHTML = `
+        <div class="metric"><div class="label">Strategy</div><div class="value">${escapeHtml(documentMeta.chunking_strategy || "-")}</div></div>
+        <div class="metric"><div class="label">Chunk Size</div><div class="value">${escapeHtml(documentMeta.chunk_size ?? "-")}</div></div>
+        <div class="metric"><div class="label">Chunk Overlap</div><div class="value">${escapeHtml(documentMeta.chunk_overlap ?? "-")}</div></div>
+        <div class="metric"><div class="label">Source</div><div class="value">${escapeHtml(documentMeta.source || "-")}</div></div>
+        <div class="metric"><div class="label">Matched Chunks</div><div class="value">${escapeHtml(total)}</div></div>
+      `;
+    }
+
+    function renderChunks(items) {
+      if (!items.length) {
+        el.chunks.innerHTML = `<div class="mono">No chunks matched the current filters.</div>`;
+        return;
+      }
+      el.chunks.innerHTML = items.map((item) => `
+        <article class="chunk">
+          <div class="chunk-head">
+            <span class="pill mono">${escapeHtml(item.chunk_id)}</span>
+            <span class="pill">page ${escapeHtml(item.page_number ?? "-")}</span>
+            <span class="pill">${escapeHtml(item.source || "-")}</span>
+          </div>
+          <div class="chunk-text">${escapeHtml(item.text || "")}</div>
+        </article>
+      `).join("");
+    }
+
+    function updatePaging() {
+      const start = state.total === 0 ? 0 : state.offset + 1;
+      const end = Math.min(state.offset + state.limit, state.total);
+      el.paging.textContent = `Showing ${start}-${end} of ${state.total}`;
+      el.prevBtn.disabled = state.offset <= 0;
+      el.nextBtn.disabled = state.offset + state.limit >= state.total;
+    }
+
+    function buildUrl() {
+      const params = new URLSearchParams();
+      params.set("limit", String(state.limit));
+      params.set("offset", String(state.offset));
+      if (state.pageNumber !== null && state.pageNumber !== "") {
+        params.set("page_number", String(state.pageNumber));
+      }
+      if (state.q) {
+        params.set("q", state.q);
+      }
+      return `/documents/${encodeURIComponent(state.docId)}/chunks?${params.toString()}`;
+    }
+
+    async function loadChunks() {
+      const payload = await window.uiAuth.apiFetch(buildUrl());
+      state.total = payload.total || 0;
+      renderSummary(payload.document, state.total);
+      renderChunks(payload.items || []);
+      updatePaging();
+      setMsg(`Loaded ${payload.items.length} chunk(s).`);
+    }
+
+    function applyFilters(resetOffset = true) {
+      state.q = el.searchInput.value.trim();
+      state.pageNumber = el.pageInput.value ? Number(el.pageInput.value) : null;
+      state.limit = Number(el.limitSelect.value || "20");
+      if (resetOffset) {
+        state.offset = 0;
+      }
+    }
+
+    el.applyBtn.addEventListener("click", async () => {
+      try {
+        applyFilters(true);
+        setMsg("Loading chunks...");
+        await loadChunks();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    el.resetBtn.addEventListener("click", async () => {
+      try {
+        el.searchInput.value = "";
+        el.pageInput.value = "";
+        el.limitSelect.value = "20";
+        applyFilters(true);
+        setMsg("Loading chunks...");
+        await loadChunks();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    el.prevBtn.addEventListener("click", async () => {
+      try {
+        if (state.offset <= 0) return;
+        state.offset = Math.max(0, state.offset - state.limit);
+        setMsg("Loading chunks...");
+        await loadChunks();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    el.nextBtn.addEventListener("click", async () => {
+      try {
+        if (state.offset + state.limit >= state.total) return;
+        state.offset += state.limit;
+        setMsg("Loading chunks...");
+        await loadChunks();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    });
+
+    el.logoutBtn.addEventListener("click", () => {
+      window.uiAuth.logout();
+    });
+
+    (async function init() {
+      window.uiAuth.requireAuthOrRedirect();
+      try {
+        applyFilters(true);
+        await loadChunks();
+      } catch (err) {
+        setMsg(String(err?.message || err));
+      }
+    })();
+  </script>
+</body>
+</html>

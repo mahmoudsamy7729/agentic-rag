@@ -26,5 +26,9 @@ class VectorStore(ABC):
         """Return top-k most similar chunks."""
 
     @abstractmethod
+    async def list_chunks(self, *, doc_id: str) -> list[RAGChunk]:
+        """Return all indexed chunks for a document."""
+
+    @abstractmethod
     async def delete_by_doc_id(self, *, doc_id: str) -> None:
         """Delete all chunks for a given document id."""
