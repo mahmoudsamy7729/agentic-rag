@@ -7,6 +7,15 @@ from src.api.v1.schemas.documents import (
     DocumentItem,
     DocumentListResponse,
 )
+from src.api.v1.schemas.evaluation import (
+    EvaluationCaseItem,
+    EvaluationCaseListResponse,
+    EvaluationGroupedBucket,
+    EvaluationMetricSummary,
+    EvaluationRunDetailResponse,
+    EvaluationRunItem,
+    EvaluationRunListResponse,
+)
 from src.api.v1.schemas.health import LLMHealthResponse, ToolsHealthResponse
 from src.api.v1.schemas.rag import (
     RAGIngestPDFResponse,
@@ -24,6 +33,13 @@ __all__ = [
     "DocumentDeleteResponse",
     "DocumentItem",
     "DocumentListResponse",
+    "EvaluationCaseItem",
+    "EvaluationCaseListResponse",
+    "EvaluationGroupedBucket",
+    "EvaluationMetricSummary",
+    "EvaluationRunDetailResponse",
+    "EvaluationRunItem",
+    "EvaluationRunListResponse",
     "LLMHealthResponse",
     "RAGIngestPDFResponse",
     "RAGIngestTextRequest",

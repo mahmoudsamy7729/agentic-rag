@@ -11,6 +11,13 @@ from src.infrastructure.database import get_db
 from src.infrastructure.llm.huggingface_embeddings import HuggingFaceEmbeddingProvider
 from src.infrastructure.llm.openai_embeddings import OpenAIEmbeddingProvider
 from src.infrastructure.llm.openai_llm import OpenAILLM
+from src.infrastructure.database import AsyncSessionFactory
+from src.modules.evaluation.judge import ContextRelevanceJudge
+from src.modules.evaluation.retriever import (
+    EvaluationRetriever,
+    RAGRetrievalEvaluatorAdapter,
+)
+from src.modules.evaluation.service import RetrievalEvaluationService
 from src.rag.embeddings import EmbeddingProvider
 from src.rag.ingestion import (
     ChunkingStrategyRegistry,
@@ -256,3 +263,45 @@ def get_agent_ask_pipeline(
 
 
 AgentAskPipelineDep = Annotated[AgentAskPipeline, Depends(get_agent_ask_pipeline)]
+
+
+@lru_cache
+def get_evaluation_retriever() -> EvaluationRetriever:
+    return RAGRetrievalEvaluatorAdapter(
+        retrieval_service=get_rag_retrieval_service(),
+    )
+
+
+@lru_cache
+def get_evaluation_judge() -> ContextRelevanceJudge | None:
+    if not settings.openai_key:
+        raise RuntimeError("Missing OPENAI_KEY in environment.")
+    if not settings.evaluation_judge_model:
+        raise RuntimeError("Missing EVALUATION_JUDGE_MODEL in environment.")
+
+    llm = OpenAILLM(
+        api_key=settings.openai_key,
+        model=settings.evaluation_judge_model,
+        base_url=settings.evaluation_judge_base_url or settings.ollama_base_url,
+    )
+    return ContextRelevanceJudge(
+        llm=llm,
+        max_tokens=settings.evaluation_judge_max_tokens,
+        temperature=settings.evaluation_judge_temperature,
+        timeout_s=settings.evaluation_judge_timeout_s,
+    )
+
+
+@lru_cache
+def get_retrieval_evaluation_service() -> RetrievalEvaluationService:
+    return RetrievalEvaluationService(
+        session_factory=AsyncSessionFactory,
+        dataset_storage_dir=settings.evaluation_data_dir,
+        retriever_factory=get_evaluation_retriever,
+        judge_factory=get_evaluation_judge,
+    )
+
+
+RetrievalEvaluationServiceDep = Annotated[
+    RetrievalEvaluationService, Depends(get_retrieval_evaluation_service)
+]

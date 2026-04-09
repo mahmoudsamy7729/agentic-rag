@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, Field
+
+
+class EvaluationMetricSummary(BaseModel):
+    hit_at_k_avg: float | None = Field(default=None)
+    recall_at_k_avg: float | None = Field(default=None)
+    precision_at_k_avg: float | None = Field(default=None)
+    mrr_avg: float | None = Field(default=None)
+    keyword_coverage_avg: float | None = Field(default=None)
+    context_relevance_score_avg: float | None = Field(default=None)
+
+
+class EvaluationGroupedBucket(BaseModel):
+    count: int = Field(description="Number of cases in the group.")
+    hit_at_k_avg: float | None = Field(default=None)
+    recall_at_k_avg: float | None = Field(default=None)
+    precision_at_k_avg: float | None = Field(default=None)
+    mrr_avg: float | None = Field(default=None)
+    keyword_coverage_avg: float | None = Field(default=None)
+    context_relevance_score_avg: float | None = Field(default=None)
+
+
+class EvaluationRunItem(BaseModel):
+    run_id: UUID
+    file_id: str
+    status: str
+    evaluation_type: str
+    dataset_name: str
+    dataset_sha256: str
+    total_cases: int
+    processed_cases: int
+    k: int
+    config_snapshot: dict
+    grouped_summary: dict[str, dict[str, EvaluationGroupedBucket]] = Field(default_factory=dict)
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    metrics: EvaluationMetricSummary
+
+
+class EvaluationRunListResponse(BaseModel):
+    status: str
+    items: list[EvaluationRunItem] = Field(default_factory=list)
+    limit: int
+    offset: int
+
+
+class EvaluationRunDetailResponse(BaseModel):
+    status: str
+    item: EvaluationRunItem
+
+
+class EvaluationCaseItem(BaseModel):
+    case_id: UUID
+    case_index: int
+    status: str
+    question: str
+    reference_answer: str
+    must_include_keywords: list[str]
+    must_include_phrases: list[str]
+    difficulty: str | None = None
+    category: str | None = None
+    hit_at_k: float | None = None
+    recall_at_k: float | None = None
+    precision_at_k: float | None = None
+    mrr: float | None = None
+    keyword_coverage: float | None = None
+    context_relevance_score: int | None = None
+    context_relevance_explanation: str | None = None
+    matched_phrases: list[str] = Field(default_factory=list)
+    matched_keywords: list[str] = Field(default_factory=list)
+    first_correct_rank: int | None = None
+    useful_chunk_count: int | None = None
+    retrieved_chunk_ids: list[str] = Field(default_factory=list)
+    retrieved_chunk_texts: list[str] = Field(default_factory=list)
+    file_id: str
+    error_message: str | None = None
+
+
+class EvaluationCaseListResponse(BaseModel):
+    status: str
+    run_id: UUID
+    total: int
+    limit: int
+    offset: int
+    items: list[EvaluationCaseItem] = Field(default_factory=list)
