@@ -9,7 +9,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import src.modules.documents.models  # noqa: F401
-import src.modules.evaluation.models  # noqa: F401
 import src.modules.semantic_cache.models  # noqa: F401
 import src.modules.users.models  # noqa: F401
 from src.infrastructure.database import Base
