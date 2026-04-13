@@ -1,0 +1,386 @@
+{% extends "evaluation_base.html" %}
+
+{% block title %}Compare Runs{% endblock %}
+{% block page_title %}Compare Runs{% endblock %}
+{% block page_subtitle %}Compare aggregate retrieval metrics, subgroup performance, and case-level differences across two or more runs.{% endblock %}
+
+{% block page_actions %}
+  <a href="/evaluations-ui" class="secondary-button">Choose from Runs</a>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <div>
+          <h3>Run Selection</h3>
+          <p>Open this page directly or arrive with preselected run IDs from the runs table.</p>
+        </div>
+        <div class="inline-actions">
+          <button id="applyCompareBtn" type="button" class="button">Compare selected runs</button>
+          <button id="resetCompareSelectionBtn" type="button" class="ghost-button">Clear selection</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="compareRunSelect">Runs</label>
+        <select id="compareRunSelect" multiple size="10"></select>
+        <div class="help-text">Hold Ctrl or Cmd to select multiple runs.</div>
+      </div>
+      <div id="selectedRunChips" class="chip-list" style="margin-top:14px;"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <div>
+          <h3>Comparison Summary</h3>
+          <p>Selected runs with document, dataset, strategy, K, status, and case volume.</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Document</th>
+              <th>Dataset</th>
+              <th>Chunking Strategy</th>
+              <th>K</th>
+              <th>Status</th>
+              <th>Total Cases</th>
+            </tr>
+          </thead>
+          <tbody id="compareSummaryBody">
+            <tr><td colspan="7" class="empty-state">Select at least two runs to compare.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <div>
+          <h3>Comparison Metrics</h3>
+          <p>Aggregate metrics across the selected runs.</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th id="metricRunColumnsHeader" colspan="1">Runs</th>
+            </tr>
+          </thead>
+          <tbody id="compareMetricsBody">
+            <tr><td colspan="2" class="empty-state">No metrics to compare yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <div>
+          <h3>Visual Comparison</h3>
+          <p>Simple charts to compare aggregate metrics and subgroup averages without introducing extra dependencies.</p>
+        </div>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>Aggregate MRR</h3>
+          <div id="aggregateChart" class="chart-list"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Hit@K by Category</h3>
+          <div id="categoryChart" class="chart-list"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Recall@K by Difficulty</h3>
+          <div id="difficultyChart" class="chart-list"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <div>
+          <h3>Detailed Comparison</h3>
+          <p id="detailedComparisonMeta">Pairwise case-level sections appear when exactly two runs are selected.</p>
+        </div>
+      </div>
+      <div class="detail-grid">
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Run A outperformed Run B</th><th>Score delta</th></tr></thead>
+            <tbody id="runAOutperformedBody"><tr><td colspan="2" class="empty-state">Select exactly two runs.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Run B outperformed Run A</th><th>Score delta</th></tr></thead>
+            <tbody id="runBOutperformedBody"><tr><td colspan="2" class="empty-state">Select exactly two runs.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="table-scroll" style="margin-top:16px;">
+        <table>
+          <thead><tr><th>Cases where both failed</th><th>Question</th></tr></thead>
+          <tbody id="bothFailedBody"><tr><td colspan="2" class="empty-state">Select exactly two runs.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const compareState = {
+    runOptions: [],
+    selectedIds: window.evalAdmin.parseCompareIds(),
+    runs: [],
+    casesByRunId: {},
+  };
+
+  const compareEl = {
+    compareRunSelect: document.getElementById("compareRunSelect"),
+    applyCompareBtn: document.getElementById("applyCompareBtn"),
+    resetCompareSelectionBtn: document.getElementById("resetCompareSelectionBtn"),
+    selectedRunChips: document.getElementById("selectedRunChips"),
+    compareSummaryBody: document.getElementById("compareSummaryBody"),
+    metricRunColumnsHeader: document.getElementById("metricRunColumnsHeader"),
+    compareMetricsBody: document.getElementById("compareMetricsBody"),
+    aggregateChart: document.getElementById("aggregateChart"),
+    categoryChart: document.getElementById("categoryChart"),
+    difficultyChart: document.getElementById("difficultyChart"),
+    detailedComparisonMeta: document.getElementById("detailedComparisonMeta"),
+    runAOutperformedBody: document.getElementById("runAOutperformedBody"),
+    runBOutperformedBody: document.getElementById("runBOutperformedBody"),
+    bothFailedBody: document.getElementById("bothFailedBody"),
+  };
+
+  async function loadRunOptions() {
+    const payload = await window.uiAuth.apiFetch("/evaluations?limit=500&offset=0");
+    compareState.runOptions = payload.items || [];
+    renderRunSelect();
+    if (compareState.selectedIds.length >= 2) {
+      await loadSelectedRuns();
+    }
+  }
+
+  function renderRunSelect() {
+    compareEl.compareRunSelect.innerHTML = compareState.runOptions.map(function (item) {
+      const label = (item.document_name || item.file_id) + " | " + item.dataset_name + " | " + item.run_id.slice(0, 8);
+      const selected = compareState.selectedIds.indexOf(item.run_id) !== -1 ? "selected" : "";
+      return '<option value="' + window.evalAdmin.escapeHtml(item.run_id) + '" ' + selected + ">" + window.evalAdmin.escapeHtml(label) + "</option>";
+    }).join("");
+    renderSelectedChips();
+  }
+
+  function renderSelectedChips() {
+    if (!compareState.selectedIds.length) {
+      compareEl.selectedRunChips.innerHTML = '<span class="chip">No runs selected</span>';
+      return;
+    }
+    compareEl.selectedRunChips.innerHTML = compareState.selectedIds.map(function (runId) {
+      const item = compareState.runOptions.find(function (run) { return run.run_id === runId; });
+      return '<span class="chip">' + window.evalAdmin.escapeHtml(item ? (item.document_name || item.run_id) : runId) + "</span>";
+    }).join("");
+  }
+
+  async function loadSelectedRuns() {
+    if (compareState.selectedIds.length < 2) {
+      compareState.runs = [];
+      compareState.casesByRunId = {};
+      renderComparison();
+      return;
+    }
+    const details = await Promise.all(compareState.selectedIds.map(function (runId) {
+      return Promise.all([
+        window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(runId)),
+        window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(runId) + "/cases?limit=5000&offset=0"),
+      ]);
+    }));
+    compareState.runs = details.map(function (tuple) { return tuple[0].item; });
+    compareState.casesByRunId = {};
+    details.forEach(function (tuple, index) {
+      compareState.casesByRunId[compareState.selectedIds[index]] = tuple[1].items || [];
+    });
+    renderComparison();
+  }
+
+  function renderComparison() {
+    renderSummaryTable();
+    renderMetricsTable();
+    renderCharts();
+    renderPairwiseDetails();
+  }
+
+  function renderSummaryTable() {
+    if (compareState.runs.length < 2) {
+      compareEl.compareSummaryBody.innerHTML = '<tr><td colspan="7" class="empty-state">Select at least two runs to compare.</td></tr>';
+      return;
+    }
+    compareEl.compareSummaryBody.innerHTML = compareState.runs.map(function (run) {
+      return [
+        "<tr>",
+        "  <td><div class='mono'>" + window.evalAdmin.escapeHtml(run.run_id) + "</div></td>",
+        "  <td>" + window.evalAdmin.escapeHtml(run.document_name || run.file_id) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(run.dataset_name) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(run.chunking_strategy || "-") + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(run.k) + "</td>",
+        "  <td>" + window.evalAdmin.renderBadge(run.status) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(run.total_cases) + "</td>",
+        "</tr>",
+      ].join("");
+    }).join("");
+  }
+
+  function renderMetricsTable() {
+    if (compareState.runs.length < 2) {
+      compareEl.compareMetricsBody.innerHTML = '<tr><td colspan="2" class="empty-state">No metrics to compare yet.</td></tr>';
+      compareEl.metricRunColumnsHeader.colSpan = 1;
+      return;
+    }
+    compareEl.metricRunColumnsHeader.colSpan = compareState.runs.length;
+    compareEl.metricRunColumnsHeader.textContent = compareState.runs.length + " runs";
+    const rows = [
+      ["Hit@K", "hit_at_k_avg"],
+      ["Recall@K", "recall_at_k_avg"],
+      ["Precision@K", "precision_at_k_avg"],
+      ["MRR", "mrr_avg"],
+      ["Keyword Coverage", "keyword_coverage_avg"],
+      ["Context Relevance Score", "context_relevance_score_avg"],
+    ];
+    compareEl.compareMetricsBody.innerHTML = rows.map(function (row) {
+      return [
+        "<tr>",
+        "  <td>" + row[0] + "</td>",
+      ].concat(compareState.runs.map(function (run) {
+        const value = run.metrics[row[1]];
+        return "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(value, row[1] === "context_relevance_score_avg" ? 2 : 3)) + "</td>";
+      })).concat("</tr>").join("");
+    }).join("");
+  }
+
+  function renderCharts() {
+    if (compareState.runs.length < 2) {
+      compareEl.aggregateChart.innerHTML = '<div class="empty-state">Select runs to render charts.</div>';
+      compareEl.categoryChart.innerHTML = '<div class="empty-state">Select runs to render charts.</div>';
+      compareEl.difficultyChart.innerHTML = '<div class="empty-state">Select runs to render charts.</div>';
+      return;
+    }
+    compareEl.aggregateChart.innerHTML = window.evalAdmin.createMetricChart(compareState.runs.map(function (run) {
+      return {
+        label: (run.document_name || run.run_id.slice(0, 8)) + " | " + run.dataset_name,
+        value: run.metrics.mrr_avg || 0,
+      };
+    }), function (value) { return window.evalAdmin.formatMetric(value); });
+
+    const categoryRows = compareState.runs.map(function (run) {
+      const values = Object.values((run.grouped_summary && run.grouped_summary.category) || {}).map(function (item) {
+        return item.hit_at_k_avg;
+      });
+      return {
+        label: (run.document_name || run.run_id.slice(0, 8)) + " | category avg",
+        value: window.evalAdmin.average(values) || 0,
+      };
+    });
+    compareEl.categoryChart.innerHTML = window.evalAdmin.createMetricChart(categoryRows, function (value) {
+      return window.evalAdmin.formatMetric(value);
+    });
+
+    const difficultyRows = compareState.runs.map(function (run) {
+      const values = Object.values((run.grouped_summary && run.grouped_summary.difficulty) || {}).map(function (item) {
+        return item.recall_at_k_avg;
+      });
+      return {
+        label: (run.document_name || run.run_id.slice(0, 8)) + " | difficulty avg",
+        value: window.evalAdmin.average(values) || 0,
+      };
+    });
+    compareEl.difficultyChart.innerHTML = window.evalAdmin.createMetricChart(difficultyRows, function (value) {
+      return window.evalAdmin.formatMetric(value);
+    });
+  }
+
+  function renderPairwiseDetails() {
+    if (compareState.runs.length !== 2) {
+      compareEl.detailedComparisonMeta.textContent = "Pairwise case-level sections are shown when exactly two runs are selected.";
+      compareEl.runAOutperformedBody.innerHTML = '<tr><td colspan="2" class="empty-state">Select exactly two runs.</td></tr>';
+      compareEl.runBOutperformedBody.innerHTML = '<tr><td colspan="2" class="empty-state">Select exactly two runs.</td></tr>';
+      compareEl.bothFailedBody.innerHTML = '<tr><td colspan="2" class="empty-state">Select exactly two runs.</td></tr>';
+      return;
+    }
+    const runA = compareState.runs[0];
+    const runB = compareState.runs[1];
+    const casesA = compareState.casesByRunId[runA.run_id] || [];
+    const casesB = compareState.casesByRunId[runB.run_id] || [];
+    const mapB = {};
+    casesB.forEach(function (item) { mapB[item.case_index] = item; });
+    const betterA = [];
+    const betterB = [];
+    const bothFailed = [];
+    casesA.forEach(function (caseA) {
+      const caseB = mapB[caseA.case_index];
+      if (!caseB) return;
+      const scoreA = window.evalAdmin.compositeCaseScore(caseA);
+      const scoreB = window.evalAdmin.compositeCaseScore(caseB);
+      if (caseA.status === "failed" && caseB.status === "failed") {
+        bothFailed.push([caseA, caseB]);
+        return;
+      }
+      if (scoreA === null || scoreB === null) return;
+      const delta = scoreA - scoreB;
+      if (delta > 0.0001) betterA.push({ question: caseA.question, delta: delta });
+      if (delta < -0.0001) betterB.push({ question: caseA.question, delta: Math.abs(delta) });
+    });
+    betterA.sort(function (a, b) { return b.delta - a.delta; });
+    betterB.sort(function (a, b) { return b.delta - a.delta; });
+    compareEl.detailedComparisonMeta.textContent =
+      "Pairwise comparison for " + (runA.document_name || runA.run_id.slice(0, 8)) +
+      " versus " + (runB.document_name || runB.run_id.slice(0, 8)) + ".";
+    compareEl.runAOutperformedBody.innerHTML = betterA.length ? betterA.slice(0, 10).map(function (item) {
+      return "<tr><td>" + window.evalAdmin.escapeHtml(item.question) + "</td><td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.delta, 3)) + "</td></tr>";
+    }).join("") : '<tr><td colspan="2" class="empty-state">No cases where Run A outperformed Run B.</td></tr>';
+    compareEl.runBOutperformedBody.innerHTML = betterB.length ? betterB.slice(0, 10).map(function (item) {
+      return "<tr><td>" + window.evalAdmin.escapeHtml(item.question) + "</td><td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.delta, 3)) + "</td></tr>";
+    }).join("") : '<tr><td colspan="2" class="empty-state">No cases where Run B outperformed Run A.</td></tr>';
+    compareEl.bothFailedBody.innerHTML = bothFailed.length ? bothFailed.slice(0, 10).map(function (pair) {
+      return "<tr><td>" + pair[0].case_index + "</td><td>" + window.evalAdmin.escapeHtml(pair[0].question) + "</td></tr>";
+    }).join("") : '<tr><td colspan="2" class="empty-state">No cases where both runs failed.</td></tr>';
+  }
+
+  compareEl.applyCompareBtn.addEventListener("click", async function () {
+    compareState.selectedIds = Array.from(compareEl.compareRunSelect.selectedOptions).map(function (item) { return item.value; });
+    renderSelectedChips();
+    if (compareState.selectedIds.length) {
+      window.history.replaceState({}, "", window.evalAdmin.compareIdsToQuery(compareState.selectedIds));
+    }
+    await loadSelectedRuns();
+  });
+
+  compareEl.resetCompareSelectionBtn.addEventListener("click", function () {
+    compareState.selectedIds = [];
+    Array.from(compareEl.compareRunSelect.options).forEach(function (option) { option.selected = false; });
+    renderSelectedChips();
+    renderComparison();
+    window.history.replaceState({}, "", "/evaluations-compare-ui");
+  });
+
+  (async function init() {
+    try {
+      await loadRunOptions();
+    } catch (err) {
+      compareEl.compareSummaryBody.innerHTML = '<tr><td colspan="7" class="error-state">' + window.evalAdmin.escapeHtml(String(err && err.message ? err.message : err)) + "</td></tr>";
+    }
+  })();
+</script>
+{% endblock %}

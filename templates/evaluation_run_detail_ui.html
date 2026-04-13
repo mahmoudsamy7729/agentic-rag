@@ -1,0 +1,473 @@
+{% extends "evaluation_base.html" %}
+
+{% block title %}Run Details{% endblock %}
+{% block page_title %}Run Details{% endblock %}
+{% block page_subtitle %}Live progress, aggregate metrics, and per-case inspection in a single workspace with polling while the run is active.{% endblock %}
+
+{% block page_actions %}
+  <a href="/evaluations-ui" class="secondary-button">All Runs</a>
+{% endblock %}
+
+{% block content %}
+  <section class="split-grid">
+    <div>
+      <section class="panel">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <h3 id="runHeaderTitle">Run</h3>
+              <p id="runHeaderMeta">Loading run metadata...</p>
+            </div>
+            <div class="inline-actions">
+              <a id="compareRunLink" href="#" class="secondary-button">Compare</a>
+              <a id="duplicateRunLink" href="#" class="ghost-button">Duplicate config</a>
+              <button id="refreshRunBtn" type="button" class="ghost-button">Refresh now</button>
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div class="meta-item"><div class="label">Document</div><div class="value" id="metaDocument">-</div></div>
+            <div class="meta-item"><div class="label">Dataset</div><div class="value" id="metaDataset">-</div></div>
+            <div class="meta-item"><div class="label">Chunking Strategy</div><div class="value" id="metaChunking">-</div></div>
+            <div class="meta-item"><div class="label">K</div><div class="value" id="metaK">-</div></div>
+            <div class="meta-item"><div class="label">Started</div><div class="value" id="metaStarted">-</div></div>
+            <div class="meta-item"><div class="label">Finished</div><div class="value" id="metaFinished">-</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <h3>Progress</h3>
+              <p id="progressText">Waiting for run data...</p>
+            </div>
+            <div id="runStatusBadge">-</div>
+          </div>
+          <div class="progress-shell">
+            <div class="progress-track"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
+            <div class="summary-grid">
+              <div class="mini-card"><div class="label">Processed</div><div class="value" id="processedCases">-</div></div>
+              <div class="mini-card"><div class="label">Pending</div><div class="value" id="pendingCases">-</div></div>
+              <div class="mini-card"><div class="label">Running</div><div class="value" id="runningCases">-</div></div>
+              <div class="mini-card"><div class="label">Completed</div><div class="value" id="completedCases">-</div></div>
+            </div>
+          </div>
+          <div class="help-text" id="failedCountText" style="margin-top:12px;">Failed cases: -</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <h3>Live Metrics Summary</h3>
+              <p>Aggregate metrics update on each poll while execution is in progress.</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            <div class="metric-card"><div class="label">Avg Hit@K</div><div id="metricHit" class="value">-</div></div>
+            <div class="metric-card"><div class="label">Avg Recall@K</div><div id="metricRecall" class="value">-</div></div>
+            <div class="metric-card"><div class="label">Avg Precision@K</div><div id="metricPrecision" class="value">-</div></div>
+            <div class="metric-card"><div class="label">Avg MRR</div><div id="metricMrr" class="value">-</div></div>
+            <div class="metric-card"><div class="label">Avg Keyword Coverage</div><div id="metricKeywordCoverage" class="value">-</div></div>
+            <div class="metric-card"><div class="label">Avg Context Relevance</div><div id="metricContextRelevance" class="value">-</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-inner">
+          <div class="panel-head">
+            <div>
+              <h3>Cases</h3>
+              <p>Inspect failures, low-score examples, and subgroup patterns without leaving the page.</p>
+            </div>
+          </div>
+
+          <div class="filters-grid">
+            <div class="field">
+              <label for="caseSearch">Search by question</label>
+              <input id="caseSearch" type="text" placeholder="Question text" />
+            </div>
+            <div class="field">
+              <label for="caseStatusFilter">Status</label>
+              <select id="caseStatusFilter">
+                <option value="">All statuses</option>
+                <option value="queued">Queued</option>
+                <option value="running">Running</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="caseCategoryFilter">Category</label>
+              <select id="caseCategoryFilter"></select>
+            </div>
+            <div class="field">
+              <label for="caseDifficultyFilter">Difficulty</label>
+              <select id="caseDifficultyFilter"></select>
+            </div>
+          </div>
+          <div class="checkbox-row" style="margin:12px 0 16px;">
+            <label><input id="failedOnlyToggle" type="checkbox" /> Failed only</label>
+            <label><input id="lowScoreOnlyToggle" type="checkbox" /> Low-score only</label>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Question</th>
+                  <th>Category</th>
+                  <th>Difficulty</th>
+                  <th>Status</th>
+                  <th>Hit@K</th>
+                  <th>Recall@K</th>
+                  <th>Precision@K</th>
+                  <th>MRR</th>
+                  <th>Keyword Coverage</th>
+                  <th>Context Relevance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="casesBody">
+                <tr><td colspan="11" class="loading-state">Loading cases...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="panel sticky-column">
+      <div class="panel-inner">
+        <div class="panel-head">
+          <div>
+            <h3>Run Notes</h3>
+            <p>Space is reserved for retry and export controls as backend support expands.</p>
+          </div>
+        </div>
+        <div class="chip-list" id="runMetaChips"></div>
+        <div class="inline-actions" style="margin-top:16px;">
+          <button type="button" class="secondary-button" disabled>Retry failed cases</button>
+          <button type="button" class="secondary-button" disabled>Retry judge only</button>
+          <button type="button" class="secondary-button" disabled>Export case results</button>
+        </div>
+        <div id="runErrorBox" class="help-text" style="margin-top:16px;"></div>
+      </div>
+    </aside>
+  </section>
+
+  <div id="caseDrawerBackdrop" class="drawer-backdrop"></div>
+  <aside id="caseDrawer" class="drawer" aria-hidden="true">
+    <div class="panel-head">
+      <div>
+        <h3 id="drawerTitle">Case details</h3>
+        <p id="drawerSubtitle">Question and retrieval analysis.</p>
+      </div>
+      <button id="closeDrawerBtn" type="button" class="icon-button close-button">Close</button>
+    </div>
+    <div class="detail-grid">
+      <div class="meta-item"><div class="label">Status</div><div class="value" id="drawerStatus">-</div></div>
+      <div class="meta-item"><div class="label">First Correct Rank</div><div class="value" id="drawerFirstCorrectRank">-</div></div>
+      <div class="meta-item"><div class="label">Useful Chunk Count</div><div class="value" id="drawerUsefulChunkCount">-</div></div>
+      <div class="meta-item"><div class="label">Judge Score</div><div class="value" id="drawerJudgeScore">-</div></div>
+    </div>
+    <div class="panel-head" style="margin-top:20px;"><div><h3>Question</h3></div></div>
+    <div class="meta-item"><div class="value" id="drawerQuestion">-</div></div>
+    <div class="panel-head" style="margin-top:18px;"><div><h3>Reference answer</h3></div></div>
+    <div class="meta-item"><div class="value" id="drawerReferenceAnswer">-</div></div>
+    <div class="panel-head" style="margin-top:18px;"><div><h3>Keywords and phrases</h3></div></div>
+    <div class="meta-item"><div class="label">Must include keywords</div><div id="drawerMustKeywords" class="chip-list"></div></div>
+    <div class="meta-item" style="margin-top:12px;"><div class="label">Must include phrases</div><div id="drawerMustPhrases" class="chip-list"></div></div>
+    <div class="meta-item" style="margin-top:12px;"><div class="label">Matched keywords</div><div id="drawerMatchedKeywords" class="chip-list"></div></div>
+    <div class="meta-item" style="margin-top:12px;"><div class="label">Matched phrases</div><div id="drawerMatchedPhrases" class="chip-list"></div></div>
+    <div class="panel-head" style="margin-top:18px;"><div><h3>Retrieved chunks</h3></div></div>
+    <div class="meta-item"><div class="label">Chunk IDs</div><div id="drawerChunkIds" class="chip-list"></div></div>
+    <div class="meta-item" style="margin-top:12px;"><div class="label">Chunk texts</div><div id="drawerChunkTexts" class="value"></div></div>
+    <div class="panel-head" style="margin-top:18px;"><div><h3>Metric values</h3></div></div>
+    <div class="meta-grid">
+      <div class="meta-item"><div class="label">Hit@K</div><div class="value" id="drawerHit">-</div></div>
+      <div class="meta-item"><div class="label">Recall@K</div><div class="value" id="drawerRecall">-</div></div>
+      <div class="meta-item"><div class="label">Precision@K</div><div class="value" id="drawerPrecision">-</div></div>
+      <div class="meta-item"><div class="label">MRR</div><div class="value" id="drawerMrr">-</div></div>
+      <div class="meta-item"><div class="label">Keyword Coverage</div><div class="value" id="drawerKeywordCoverage">-</div></div>
+      <div class="meta-item"><div class="label">Context Relevance</div><div class="value" id="drawerContextRelevance">-</div></div>
+    </div>
+    <div class="meta-item" style="margin-top:18px;">
+      <div class="label">Judge explanation</div>
+      <div class="value" id="drawerJudgeExplanation">-</div>
+    </div>
+    <div class="meta-item" style="margin-top:12px;">
+      <div class="label">Error</div>
+      <div class="value" id="drawerError">-</div>
+    </div>
+  </aside>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const runId = "{{ run_id }}";
+  const detailState = {
+    run: null,
+    cases: [],
+    pollTimer: null,
+  };
+
+  const detailEl = {
+    runHeaderTitle: document.getElementById("runHeaderTitle"),
+    runHeaderMeta: document.getElementById("runHeaderMeta"),
+    compareRunLink: document.getElementById("compareRunLink"),
+    duplicateRunLink: document.getElementById("duplicateRunLink"),
+    refreshRunBtn: document.getElementById("refreshRunBtn"),
+    metaDocument: document.getElementById("metaDocument"),
+    metaDataset: document.getElementById("metaDataset"),
+    metaChunking: document.getElementById("metaChunking"),
+    metaK: document.getElementById("metaK"),
+    metaStarted: document.getElementById("metaStarted"),
+    metaFinished: document.getElementById("metaFinished"),
+    progressText: document.getElementById("progressText"),
+    runStatusBadge: document.getElementById("runStatusBadge"),
+    progressFill: document.getElementById("progressFill"),
+    processedCases: document.getElementById("processedCases"),
+    pendingCases: document.getElementById("pendingCases"),
+    runningCases: document.getElementById("runningCases"),
+    completedCases: document.getElementById("completedCases"),
+    failedCountText: document.getElementById("failedCountText"),
+    metricHit: document.getElementById("metricHit"),
+    metricRecall: document.getElementById("metricRecall"),
+    metricPrecision: document.getElementById("metricPrecision"),
+    metricMrr: document.getElementById("metricMrr"),
+    metricKeywordCoverage: document.getElementById("metricKeywordCoverage"),
+    metricContextRelevance: document.getElementById("metricContextRelevance"),
+    caseSearch: document.getElementById("caseSearch"),
+    caseStatusFilter: document.getElementById("caseStatusFilter"),
+    caseCategoryFilter: document.getElementById("caseCategoryFilter"),
+    caseDifficultyFilter: document.getElementById("caseDifficultyFilter"),
+    failedOnlyToggle: document.getElementById("failedOnlyToggle"),
+    lowScoreOnlyToggle: document.getElementById("lowScoreOnlyToggle"),
+    casesBody: document.getElementById("casesBody"),
+    runMetaChips: document.getElementById("runMetaChips"),
+    runErrorBox: document.getElementById("runErrorBox"),
+    caseDrawerBackdrop: document.getElementById("caseDrawerBackdrop"),
+    caseDrawer: document.getElementById("caseDrawer"),
+    closeDrawerBtn: document.getElementById("closeDrawerBtn"),
+    drawerTitle: document.getElementById("drawerTitle"),
+    drawerSubtitle: document.getElementById("drawerSubtitle"),
+    drawerStatus: document.getElementById("drawerStatus"),
+    drawerFirstCorrectRank: document.getElementById("drawerFirstCorrectRank"),
+    drawerUsefulChunkCount: document.getElementById("drawerUsefulChunkCount"),
+    drawerJudgeScore: document.getElementById("drawerJudgeScore"),
+    drawerQuestion: document.getElementById("drawerQuestion"),
+    drawerReferenceAnswer: document.getElementById("drawerReferenceAnswer"),
+    drawerMustKeywords: document.getElementById("drawerMustKeywords"),
+    drawerMustPhrases: document.getElementById("drawerMustPhrases"),
+    drawerMatchedKeywords: document.getElementById("drawerMatchedKeywords"),
+    drawerMatchedPhrases: document.getElementById("drawerMatchedPhrases"),
+    drawerChunkIds: document.getElementById("drawerChunkIds"),
+    drawerChunkTexts: document.getElementById("drawerChunkTexts"),
+    drawerHit: document.getElementById("drawerHit"),
+    drawerRecall: document.getElementById("drawerRecall"),
+    drawerPrecision: document.getElementById("drawerPrecision"),
+    drawerMrr: document.getElementById("drawerMrr"),
+    drawerKeywordCoverage: document.getElementById("drawerKeywordCoverage"),
+    drawerContextRelevance: document.getElementById("drawerContextRelevance"),
+    drawerJudgeExplanation: document.getElementById("drawerJudgeExplanation"),
+    drawerError: document.getElementById("drawerError"),
+  };
+
+  function populateSelect(select, values, placeholder) {
+    const current = select.value;
+    select.innerHTML = ['<option value="">' + window.evalAdmin.escapeHtml(placeholder) + '</option>']
+      .concat((values || []).map(function (value) {
+        return '<option value="' + window.evalAdmin.escapeHtml(value) + '">' + window.evalAdmin.escapeHtml(value) + "</option>";
+      }))
+      .join("");
+    if (current && values.includes(current)) {
+      select.value = current;
+    }
+  }
+
+  async function loadRun() {
+    const [runPayload, casePayload] = await Promise.all([
+      window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(runId)),
+      window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(runId) + "/cases?limit=5000&offset=0"),
+    ]);
+    detailState.run = runPayload.item;
+    detailState.cases = casePayload.items || [];
+    renderRun();
+    renderCases();
+    schedulePolling();
+  }
+
+  function renderRun() {
+    const run = detailState.run;
+    detailEl.runHeaderTitle.textContent = run.document_name || run.run_id;
+    detailEl.runHeaderMeta.textContent = "Run " + run.run_id + " | " + run.dataset_name;
+    detailEl.compareRunLink.href = window.evalAdmin.compareIdsToQuery([run.run_id]);
+    detailEl.duplicateRunLink.href = "/evaluations-create-ui?source_run_id=" + encodeURIComponent(run.run_id);
+    detailEl.metaDocument.textContent = run.document_name || run.file_id;
+    detailEl.metaDataset.textContent = run.dataset_name;
+    detailEl.metaChunking.textContent = run.chunking_strategy || "-";
+    detailEl.metaK.textContent = String(run.k);
+    detailEl.metaStarted.textContent = window.evalAdmin.formatDateTime(run.started_at || run.created_at);
+    detailEl.metaFinished.textContent = window.evalAdmin.formatDateTime(run.finished_at);
+    detailEl.runStatusBadge.innerHTML = window.evalAdmin.renderBadge(run.status);
+    detailEl.metricHit.textContent = window.evalAdmin.formatMetric(run.metrics.hit_at_k_avg);
+    detailEl.metricRecall.textContent = window.evalAdmin.formatMetric(run.metrics.recall_at_k_avg);
+    detailEl.metricPrecision.textContent = window.evalAdmin.formatMetric(run.metrics.precision_at_k_avg);
+    detailEl.metricMrr.textContent = window.evalAdmin.formatMetric(run.metrics.mrr_avg);
+    detailEl.metricKeywordCoverage.textContent = window.evalAdmin.formatMetric(run.metrics.keyword_coverage_avg);
+    detailEl.metricContextRelevance.textContent = window.evalAdmin.formatMetric(run.metrics.context_relevance_score_avg, 2);
+    const counts = countStatuses(detailState.cases);
+    const pct = run.total_cases ? Math.min(100, (run.processed_cases / run.total_cases) * 100) : 0;
+    detailEl.progressFill.style.width = pct.toFixed(1) + "%";
+    detailEl.progressText.textContent = run.processed_cases + " / " + run.total_cases + " cases processed";
+    detailEl.processedCases.textContent = String(run.processed_cases);
+    detailEl.pendingCases.textContent = String(counts.queued);
+    detailEl.runningCases.textContent = String(counts.running);
+    detailEl.completedCases.textContent = String(counts.completed);
+    detailEl.failedCountText.textContent = "Failed cases: " + counts.failed;
+    detailEl.runMetaChips.innerHTML = [
+      '<span class="chip">Dataset SHA ' + window.evalAdmin.escapeHtml(run.dataset_sha256.slice(0, 12)) + "...</span>",
+      '<span class="chip">Created ' + window.evalAdmin.escapeHtml(window.evalAdmin.formatDate(run.created_at)) + "</span>",
+      '<span class="chip">Total cases ' + window.evalAdmin.escapeHtml(run.total_cases) + "</span>",
+    ].join("");
+    detailEl.runErrorBox.textContent = run.error_message ? "Run error: " + run.error_message : "No run-level errors reported.";
+    populateSelect(detailEl.caseCategoryFilter, window.evalAdmin.uniq(detailState.cases.map(function (item) { return item.category || ""; }).sort()), "All categories");
+    populateSelect(detailEl.caseDifficultyFilter, window.evalAdmin.uniq(detailState.cases.map(function (item) { return item.difficulty || ""; }).sort()), "All difficulties");
+  }
+
+  function countStatuses(items) {
+    return items.reduce(function (acc, item) {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, { queued: 0, running: 0, completed: 0, failed: 0 });
+  }
+
+  function filteredCases() {
+    const search = detailEl.caseSearch.value.trim().toLowerCase();
+    const status = detailEl.caseStatusFilter.value;
+    const category = detailEl.caseCategoryFilter.value;
+    const difficulty = detailEl.caseDifficultyFilter.value;
+    return detailState.cases.filter(function (item) {
+      if (search && item.question.toLowerCase().indexOf(search) === -1) return false;
+      if (status && item.status !== status) return false;
+      if (category && (item.category || "") !== category) return false;
+      if (difficulty && (item.difficulty || "") !== difficulty) return false;
+      if (detailEl.failedOnlyToggle.checked && item.status !== "failed") return false;
+      if (detailEl.lowScoreOnlyToggle.checked && !window.evalAdmin.isLowScore(item)) return false;
+      return true;
+    });
+  }
+
+  function renderCases() {
+    const items = filteredCases();
+    if (!items.length) {
+      detailEl.casesBody.innerHTML = '<tr><td colspan="11" class="empty-state">No cases match the current filters.</td></tr>';
+      return;
+    }
+    detailEl.casesBody.innerHTML = items.map(function (item) {
+      return [
+        "<tr>",
+        "  <td><div>" + window.evalAdmin.escapeHtml(item.question) + '</div><div class="muted mono">Case ' + window.evalAdmin.escapeHtml(item.case_index) + "</div></td>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.category || "-") + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.difficulty || "-") + "</td>",
+        "  <td>" + window.evalAdmin.renderBadge(item.status) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.hit_at_k)) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.recall_at_k)) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.precision_at_k)) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.mrr)) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.keyword_coverage)) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatJudgeScore(item.context_relevance_score)) + "</td>",
+        '  <td><button type="button" class="secondary-button" data-case-id="' + window.evalAdmin.escapeHtml(item.case_id) + '">View details</button></td>',
+        "</tr>",
+      ].join("");
+    }).join("");
+  }
+
+  function openDrawer(caseItem) {
+    detailEl.drawerTitle.textContent = "Case " + caseItem.case_index;
+    detailEl.drawerSubtitle.textContent = caseItem.category || caseItem.difficulty || "Retrieval metrics";
+    detailEl.drawerStatus.innerHTML = window.evalAdmin.renderBadge(caseItem.status);
+    detailEl.drawerFirstCorrectRank.textContent = caseItem.first_correct_rank == null ? "-" : String(caseItem.first_correct_rank);
+    detailEl.drawerUsefulChunkCount.textContent = caseItem.useful_chunk_count == null ? "-" : String(caseItem.useful_chunk_count);
+    detailEl.drawerJudgeScore.textContent = window.evalAdmin.formatJudgeScore(caseItem.context_relevance_score);
+    detailEl.drawerQuestion.textContent = caseItem.question || "-";
+    detailEl.drawerReferenceAnswer.textContent = caseItem.reference_answer || "-";
+    detailEl.drawerMustKeywords.innerHTML = window.evalAdmin.chips(caseItem.must_include_keywords, "No required keywords");
+    detailEl.drawerMustPhrases.innerHTML = window.evalAdmin.chips(caseItem.must_include_phrases, "No required phrases");
+    detailEl.drawerMatchedKeywords.innerHTML = window.evalAdmin.chips(caseItem.matched_keywords, "No matches");
+    detailEl.drawerMatchedPhrases.innerHTML = window.evalAdmin.chips(caseItem.matched_phrases, "No matches");
+    detailEl.drawerChunkIds.innerHTML = window.evalAdmin.chips(caseItem.retrieved_chunk_ids, "No chunk IDs stored");
+    detailEl.drawerChunkTexts.innerHTML = (caseItem.retrieved_chunk_texts || []).length
+      ? caseItem.retrieved_chunk_texts.map(function (text, index) {
+          return '<div style="margin-bottom:12px;"><strong>Chunk ' + (index + 1) + '</strong><div class="help-text">' + window.evalAdmin.escapeHtml(text) + "</div></div>";
+        }).join("")
+      : '<span class="muted">Chunk texts were not stored for this run.</span>';
+    detailEl.drawerHit.textContent = window.evalAdmin.formatMetric(caseItem.hit_at_k);
+    detailEl.drawerRecall.textContent = window.evalAdmin.formatMetric(caseItem.recall_at_k);
+    detailEl.drawerPrecision.textContent = window.evalAdmin.formatMetric(caseItem.precision_at_k);
+    detailEl.drawerMrr.textContent = window.evalAdmin.formatMetric(caseItem.mrr);
+    detailEl.drawerKeywordCoverage.textContent = window.evalAdmin.formatMetric(caseItem.keyword_coverage);
+    detailEl.drawerContextRelevance.textContent = window.evalAdmin.formatJudgeScore(caseItem.context_relevance_score);
+    detailEl.drawerJudgeExplanation.textContent = caseItem.context_relevance_explanation || "-";
+    detailEl.drawerError.textContent = caseItem.error_message || "-";
+    detailEl.caseDrawerBackdrop.classList.add("is-open");
+    detailEl.caseDrawer.classList.add("is-open");
+    detailEl.caseDrawer.setAttribute("aria-hidden", "false");
+  }
+
+  function closeDrawer() {
+    detailEl.caseDrawerBackdrop.classList.remove("is-open");
+    detailEl.caseDrawer.classList.remove("is-open");
+    detailEl.caseDrawer.setAttribute("aria-hidden", "true");
+  }
+
+  function schedulePolling() {
+    if (detailState.pollTimer) {
+      window.clearTimeout(detailState.pollTimer);
+      detailState.pollTimer = null;
+    }
+    if (!detailState.run || (detailState.run.status !== "queued" && detailState.run.status !== "running")) {
+      return;
+    }
+    detailState.pollTimer = window.setTimeout(loadRun, 5000);
+  }
+
+  [
+    detailEl.caseSearch,
+    detailEl.caseStatusFilter,
+    detailEl.caseCategoryFilter,
+    detailEl.caseDifficultyFilter,
+    detailEl.failedOnlyToggle,
+    detailEl.lowScoreOnlyToggle,
+  ].forEach(function (input) {
+    input.addEventListener("input", renderCases);
+    input.addEventListener("change", renderCases);
+  });
+
+  detailEl.refreshRunBtn.addEventListener("click", loadRun);
+  detailEl.closeDrawerBtn.addEventListener("click", closeDrawer);
+  detailEl.caseDrawerBackdrop.addEventListener("click", closeDrawer);
+  detailEl.casesBody.addEventListener("click", function (event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const caseId = target.getAttribute("data-case-id");
+    if (!caseId) return;
+    const caseItem = detailState.cases.find(function (item) { return item.case_id === caseId; });
+    if (caseItem) openDrawer(caseItem);
+  });
+
+  (async function init() {
+    try {
+      await loadRun();
+    } catch (err) {
+      detailEl.casesBody.innerHTML = '<tr><td colspan="11" class="error-state">' + window.evalAdmin.escapeHtml(String(err && err.message ? err.message : err)) + "</td></tr>";
+      detailEl.runHeaderMeta.textContent = "Unable to load run details.";
+    }
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,433 @@
+{% extends "evaluation_base.html" %}
+
+{% block title %}New Evaluation{% endblock %}
+{% block page_title %}Create Evaluation{% endblock %}
+{% block page_subtitle %}Start a retrieval evaluation from a reusable dataset or a new JSONL upload, then redirect directly into live monitoring.{% endblock %}
+
+{% block page_actions %}
+  <a href="/evaluations-ui" class="secondary-button">Back to Runs</a>
+{% endblock %}
+
+{% block content %}
+  <section class="split-grid">
+    <div class="panel">
+      <div class="panel-inner">
+        <div class="panel-head">
+          <div>
+            <h3>Run Configuration</h3>
+            <p>Keep the main path minimal. Advanced controls stay available when you need them.</p>
+          </div>
+        </div>
+
+        <form id="createEvalForm">
+          <div class="panel-head">
+            <div>
+              <h3>Dataset</h3>
+              <p>Select a reusable dataset or upload a new JSONL file for this run.</p>
+            </div>
+            <div class="segmented">
+              <button id="useExistingDatasetBtn" type="button" class="is-active">Existing dataset</button>
+              <button id="uploadDatasetBtn" type="button">Upload JSONL</button>
+            </div>
+          </div>
+
+          <div id="existingDatasetPanel" class="form-grid">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label for="datasetSelect">Reusable Dataset</label>
+              <select id="datasetSelect"></select>
+              <div class="help-text" id="datasetMeta">Loading datasets...</div>
+            </div>
+          </div>
+
+          <div id="uploadDatasetPanel" class="form-grid hidden">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label for="datasetFileInput">JSONL Dataset Upload</label>
+              <input id="datasetFileInput" type="file" accept=".jsonl,application/json,text/plain" />
+              <div class="help-text">Each line must contain question, answer, must_include_keywords, and must_include_phrases.</div>
+            </div>
+          </div>
+
+          <div class="panel-head" style="margin-top:20px;">
+            <div>
+              <h3>Document</h3>
+              <p>Choose the indexed document to evaluate against.</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label for="documentSelect">Target Document</label>
+              <select id="documentSelect"></select>
+              <div id="documentMeta" class="help-text">Loading documents...</div>
+            </div>
+          </div>
+
+          <div class="panel-head" style="margin-top:20px;">
+            <div>
+              <h3>Retrieval Configuration</h3>
+              <p>K is applied at evaluation time. The strategy selector reflects how the chosen document is currently indexed.</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="chunkingStrategySelect">Chunking Strategy</label>
+              <select id="chunkingStrategySelect"></select>
+              <div class="help-text">To evaluate a different strategy, ingest a document version indexed with that strategy first.</div>
+            </div>
+            <div class="field">
+              <label for="kInput">K</label>
+              <input id="kInput" type="number" min="1" max="100" value="5" />
+            </div>
+          </div>
+
+          <details class="advanced" style="margin-top:20px;">
+            <summary>Advanced configuration</summary>
+            <div class="advanced-body">
+              <div class="form-grid">
+                <div class="field">
+                  <label for="stripPunctuationInput">Normalization</label>
+                  <select id="stripPunctuationInput">
+                    <option value="true">Strip punctuation</option>
+                    <option value="false">Keep punctuation</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="minKeywordHitsInput">Useful Chunk Threshold: Keyword Hits</label>
+                  <input id="minKeywordHitsInput" type="number" min="0" max="100" value="{{ evaluation_defaults.min_keyword_hits }}" />
+                </div>
+                <div class="field">
+                  <label for="minKeywordRatioInput">Useful Chunk Threshold: Keyword Ratio</label>
+                  <input id="minKeywordRatioInput" type="number" min="0" max="1" step="0.05" value="{{ evaluation_defaults.min_keyword_ratio }}" />
+                </div>
+                <div class="field">
+                  <label for="judgeEnabledInput">LLM Judge</label>
+                  <select id="judgeEnabledInput">
+                    <option value="true" {% if evaluation_defaults.judge_enabled %}selected{% endif %}>Enabled</option>
+                    <option value="false" {% if not evaluation_defaults.judge_enabled %}selected{% endif %}>Disabled</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="storeChunkTextsInput">Save Retrieved Chunk Texts</label>
+                  <select id="storeChunkTextsInput">
+                    <option value="true" {% if evaluation_defaults.store_retrieved_chunk_texts %}selected{% endif %}>Enabled</option>
+                    <option value="false" {% if not evaluation_defaults.store_retrieved_chunk_texts %}selected{% endif %}>Disabled</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="inline-actions" style="margin-top:20px;">
+            <button id="startEvalBtn" type="submit" class="button">Start evaluation</button>
+            <a href="/evaluations-ui" class="ghost-button">Cancel</a>
+          </div>
+          <div id="createEvalMessage" class="help-text" style="margin-top:12px;">Ready.</div>
+        </form>
+      </div>
+    </div>
+
+    <aside class="panel sticky-column">
+      <div class="panel-inner">
+        <div class="panel-head">
+          <div>
+            <h3>Preview</h3>
+            <p>The selected document and dataset determine the run header shown on the live monitoring page.</p>
+          </div>
+        </div>
+        <div class="meta-grid">
+          <div class="meta-item">
+            <div class="label">Dataset</div>
+            <div class="value" id="previewDatasetName">-</div>
+          </div>
+          <div class="meta-item">
+            <div class="label">Dataset Cases</div>
+            <div class="value" id="previewDatasetCases">-</div>
+          </div>
+          <div class="meta-item">
+            <div class="label">Document</div>
+            <div class="value" id="previewDocumentName">-</div>
+          </div>
+          <div class="meta-item">
+            <div class="label">Chunking Strategy</div>
+            <div class="value" id="previewChunking">-</div>
+          </div>
+          <div class="meta-item">
+            <div class="label">K</div>
+            <div class="value" id="previewK">-</div>
+          </div>
+          <div class="meta-item">
+            <div class="label">Judge</div>
+            <div class="value" id="previewJudge">-</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const createState = {
+    datasetMode: "existing",
+    datasets: [],
+    documents: [],
+    sourceRun: null,
+  };
+
+  const createEl = {
+    form: document.getElementById("createEvalForm"),
+    useExistingDatasetBtn: document.getElementById("useExistingDatasetBtn"),
+    uploadDatasetBtn: document.getElementById("uploadDatasetBtn"),
+    existingDatasetPanel: document.getElementById("existingDatasetPanel"),
+    uploadDatasetPanel: document.getElementById("uploadDatasetPanel"),
+    datasetSelect: document.getElementById("datasetSelect"),
+    datasetMeta: document.getElementById("datasetMeta"),
+    datasetFileInput: document.getElementById("datasetFileInput"),
+    documentSelect: document.getElementById("documentSelect"),
+    documentMeta: document.getElementById("documentMeta"),
+    chunkingStrategySelect: document.getElementById("chunkingStrategySelect"),
+    kInput: document.getElementById("kInput"),
+    stripPunctuationInput: document.getElementById("stripPunctuationInput"),
+    minKeywordHitsInput: document.getElementById("minKeywordHitsInput"),
+    minKeywordRatioInput: document.getElementById("minKeywordRatioInput"),
+    judgeEnabledInput: document.getElementById("judgeEnabledInput"),
+    storeChunkTextsInput: document.getElementById("storeChunkTextsInput"),
+    startEvalBtn: document.getElementById("startEvalBtn"),
+    createEvalMessage: document.getElementById("createEvalMessage"),
+    previewDatasetName: document.getElementById("previewDatasetName"),
+    previewDatasetCases: document.getElementById("previewDatasetCases"),
+    previewDocumentName: document.getElementById("previewDocumentName"),
+    previewChunking: document.getElementById("previewChunking"),
+    previewK: document.getElementById("previewK"),
+    previewJudge: document.getElementById("previewJudge"),
+  };
+
+  const availableStrategies = {{ chunking_strategies | tojson }};
+
+  function getQueryParam(name) {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get(name) || "").trim();
+  }
+
+  function setDatasetMode(mode) {
+    createState.datasetMode = mode;
+    createEl.useExistingDatasetBtn.classList.toggle("is-active", mode === "existing");
+    createEl.uploadDatasetBtn.classList.toggle("is-active", mode === "upload");
+    createEl.existingDatasetPanel.classList.toggle("hidden", mode !== "existing");
+    createEl.uploadDatasetPanel.classList.toggle("hidden", mode !== "upload");
+    syncPreview();
+  }
+
+  function renderDatasets() {
+    if (!createState.datasets.length) {
+      createEl.datasetSelect.innerHTML = '<option value="">No reusable datasets yet</option>';
+      createEl.datasetMeta.textContent = "Upload a JSONL file below to start the first reusable dataset.";
+      return;
+    }
+    createEl.datasetSelect.innerHTML = createState.datasets.map(function (item) {
+      return '<option value="' + window.evalAdmin.escapeHtml(item.dataset_sha256) + '">' +
+        window.evalAdmin.escapeHtml(item.dataset_name) + " | " + window.evalAdmin.escapeHtml(item.total_cases) + " cases</option>";
+    }).join("");
+    updateDatasetMeta();
+  }
+
+  function renderDocuments() {
+    if (!createState.documents.length) {
+      createEl.documentSelect.innerHTML = '<option value="">No documents found</option>';
+      createEl.documentMeta.textContent = "Upload or ingest a document before running evaluation.";
+      syncChunkingSelect();
+      return;
+    }
+    createEl.documentSelect.innerHTML = createState.documents.map(function (item) {
+      const label = (item.source || item.doc_id) + " | " + (item.chunking_strategy || "unindexed strategy");
+      return '<option value="' + window.evalAdmin.escapeHtml(item.doc_id) + '">' + window.evalAdmin.escapeHtml(label) + "</option>";
+    }).join("");
+    updateDocumentMeta();
+    syncChunkingSelect();
+  }
+
+  function selectedDataset() {
+    return createState.datasets.find(function (item) {
+      return item.dataset_sha256 === createEl.datasetSelect.value;
+    }) || null;
+  }
+
+  function selectedDocument() {
+    return createState.documents.find(function (item) {
+      return item.doc_id === createEl.documentSelect.value;
+    }) || null;
+  }
+
+  function updateDatasetMeta() {
+    const dataset = selectedDataset();
+    if (!dataset) {
+      createEl.datasetMeta.textContent = "Select a dataset or switch to upload mode.";
+      return;
+    }
+    createEl.datasetMeta.textContent =
+      dataset.total_cases + " examples | categories: " + (dataset.categories.join(", ") || "none") +
+      " | difficulties: " + (dataset.difficulties.join(", ") || "none");
+  }
+
+  function updateDocumentMeta() {
+    const documentItem = selectedDocument();
+    if (!documentItem) {
+      createEl.documentMeta.textContent = "Choose a document.";
+      return;
+    }
+    createEl.documentMeta.textContent =
+      "doc_id=" + documentItem.doc_id +
+      " | indexed strategy=" + (documentItem.chunking_strategy || "unknown") +
+      (documentItem.chunk_size ? " | chunk size=" + documentItem.chunk_size : "") +
+      (documentItem.chunk_overlap ? " | overlap=" + documentItem.chunk_overlap : "");
+  }
+
+  function syncChunkingSelect() {
+    const documentItem = selectedDocument();
+    createEl.chunkingStrategySelect.innerHTML = availableStrategies.map(function (strategy) {
+      const enabled = documentItem && strategy === documentItem.chunking_strategy;
+      const label = enabled ? strategy : strategy + " (unavailable for selected document)";
+      return '<option value="' + window.evalAdmin.escapeHtml(strategy) + '" ' +
+        (enabled ? "" : "disabled") + ">" + window.evalAdmin.escapeHtml(label) + "</option>";
+    }).join("");
+    if (documentItem && documentItem.chunking_strategy) {
+      createEl.chunkingStrategySelect.value = documentItem.chunking_strategy;
+    }
+  }
+
+  function syncPreview() {
+    const dataset = selectedDataset();
+    const documentItem = selectedDocument();
+    createEl.previewDatasetName.textContent =
+      createState.datasetMode === "upload"
+        ? (createEl.datasetFileInput.files[0] ? createEl.datasetFileInput.files[0].name : "Upload pending")
+        : (dataset ? dataset.dataset_name : "-");
+    createEl.previewDatasetCases.textContent = dataset ? dataset.total_cases : (createState.datasetMode === "upload" ? "Pending parse" : "-");
+    createEl.previewDocumentName.textContent = documentItem ? (documentItem.source || documentItem.doc_id) : "-";
+    createEl.previewChunking.textContent = documentItem ? (documentItem.chunking_strategy || "-") : "-";
+    createEl.previewK.textContent = createEl.kInput.value || "-";
+    createEl.previewJudge.textContent = createEl.judgeEnabledInput.value === "true" ? "Enabled" : "Disabled";
+  }
+
+  async function loadDatasets() {
+    const payload = await window.uiAuth.apiFetch("/evaluation-datasets");
+    createState.datasets = payload.items || [];
+    renderDatasets();
+  }
+
+  async function loadDocuments() {
+    const payload = await window.uiAuth.apiFetch("/documents?limit=100&offset=0");
+    createState.documents = payload.items || [];
+    renderDocuments();
+  }
+
+  async function applyPrefill() {
+    const datasetSha = getQueryParam("dataset_sha256");
+    const sourceRunId = getQueryParam("source_run_id");
+    if (datasetSha) {
+      setDatasetMode("existing");
+      createEl.datasetSelect.value = datasetSha;
+      updateDatasetMeta();
+    }
+    if (!sourceRunId) {
+      syncPreview();
+      return;
+    }
+    const payload = await window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(sourceRunId));
+    createState.sourceRun = payload.item;
+    createEl.documentSelect.value = payload.item.file_id;
+    createEl.kInput.value = payload.item.k;
+    createEl.stripPunctuationInput.value = String(Boolean(payload.item.config_snapshot.strip_punctuation));
+    createEl.minKeywordHitsInput.value = payload.item.config_snapshot.min_keyword_hits ?? "{{ evaluation_defaults.min_keyword_hits }}";
+    createEl.minKeywordRatioInput.value = payload.item.config_snapshot.min_keyword_ratio ?? "{{ evaluation_defaults.min_keyword_ratio }}";
+    createEl.judgeEnabledInput.value = String(Boolean(payload.item.config_snapshot.judge_enabled));
+    createEl.storeChunkTextsInput.value = String(Boolean(payload.item.config_snapshot.store_retrieved_chunk_texts));
+    if (createState.datasets.some(function (item) { return item.dataset_sha256 === payload.item.dataset_sha256; })) {
+      setDatasetMode("existing");
+      createEl.datasetSelect.value = payload.item.dataset_sha256;
+      updateDatasetMeta();
+    }
+    updateDocumentMeta();
+    syncChunkingSelect();
+    syncPreview();
+  }
+
+  function validateForm() {
+    if (!selectedDocument()) {
+      throw new Error("A target document is required.");
+    }
+    if (createState.datasetMode === "existing" && !selectedDataset()) {
+      throw new Error("Select a reusable dataset or switch to upload mode.");
+    }
+    if (createState.datasetMode === "upload" && !(createEl.datasetFileInput.files && createEl.datasetFileInput.files[0])) {
+      throw new Error("Upload a JSONL dataset file.");
+    }
+    if (!createEl.chunkingStrategySelect.value) {
+      throw new Error("The selected document does not have an available chunking strategy.");
+    }
+  }
+
+  async function submitForm(event) {
+    event.preventDefault();
+    validateForm();
+    const form = new FormData();
+    form.append("file_id", createEl.documentSelect.value);
+    form.append("k", createEl.kInput.value);
+    form.append("strip_punctuation", createEl.stripPunctuationInput.value);
+    form.append("min_keyword_hits", createEl.minKeywordHitsInput.value);
+    form.append("min_keyword_ratio", createEl.minKeywordRatioInput.value);
+    form.append("judge_enabled", createEl.judgeEnabledInput.value);
+    form.append("store_retrieved_chunk_texts", createEl.storeChunkTextsInput.value);
+    if (createState.datasetMode === "existing") {
+      form.append("dataset_sha256", createEl.datasetSelect.value);
+    } else {
+      form.append("dataset_file", createEl.datasetFileInput.files[0]);
+    }
+
+    window.evalAdmin.setBusy(createEl.startEvalBtn, true, "Starting...");
+    createEl.createEvalMessage.textContent = "Creating evaluation run...";
+    try {
+      const payload = await window.uiAuth.apiFetch("/evaluations/retrieval", {
+        method: "POST",
+        body: form,
+      });
+      window.location.href = "/evaluations/" + encodeURIComponent(payload.item.run_id) + "/ui";
+    } catch (err) {
+      createEl.createEvalMessage.textContent = String(err && err.message ? err.message : err);
+      window.evalAdmin.setBusy(createEl.startEvalBtn, false);
+    }
+  }
+
+  createEl.useExistingDatasetBtn.addEventListener("click", function () { setDatasetMode("existing"); });
+  createEl.uploadDatasetBtn.addEventListener("click", function () { setDatasetMode("upload"); });
+  createEl.datasetSelect.addEventListener("change", function () {
+    updateDatasetMeta();
+    syncPreview();
+  });
+  createEl.datasetFileInput.addEventListener("change", syncPreview);
+  createEl.documentSelect.addEventListener("change", function () {
+    updateDocumentMeta();
+    syncChunkingSelect();
+    syncPreview();
+  });
+  [createEl.kInput, createEl.judgeEnabledInput].forEach(function (input) {
+    input.addEventListener("input", syncPreview);
+    input.addEventListener("change", syncPreview);
+  });
+  createEl.form.addEventListener("submit", submitForm);
+
+  (async function init() {
+    try {
+      await Promise.all([loadDatasets(), loadDocuments()]);
+      const preferredMode = createState.datasets.length ? "existing" : "upload";
+      setDatasetMode(preferredMode);
+      await applyPrefill();
+      syncPreview();
+      createEl.createEvalMessage.textContent = "Ready.";
+    } catch (err) {
+      createEl.createEvalMessage.textContent = String(err && err.message ? err.message : err);
+    }
+  })();
+</script>
+{% endblock %}

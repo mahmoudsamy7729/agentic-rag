@@ -1,0 +1,444 @@
+{% extends "evaluation_base.html" %}
+
+{% block title %}Evaluation Runs{% endblock %}
+{% block page_title %}Evaluation Runs{% endblock %}
+{% block page_subtitle %}Browse retrieval evaluations, narrow the list quickly, and move straight into compare, rerun, or run inspection workflows.{% endblock %}
+
+{% block page_actions %}
+  <a href="/evaluations-create-ui" class="button">New Evaluation</a>
+{% endblock %}
+
+{% block content %}
+  <section class="summary-grid">
+    <article class="summary-card">
+      <div class="label">Total Runs</div>
+      <div id="summaryTotal" class="value">-</div>
+      <div class="sub">Current filtered set</div>
+    </article>
+    <article class="summary-card">
+      <div class="label">Running</div>
+      <div id="summaryRunning" class="value">-</div>
+      <div class="sub">Active or queued work</div>
+    </article>
+    <article class="summary-card">
+      <div class="label">Completed</div>
+      <div id="summaryCompleted" class="value">-</div>
+      <div class="sub">Finished successfully</div>
+    </article>
+    <article class="summary-card">
+      <div class="label">Failed</div>
+      <div id="summaryFailed" class="value">-</div>
+      <div class="sub">Needs review or rerun</div>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="panel-head">
+        <div>
+          <h3>Filters</h3>
+          <p>Filter the active list by document, strategy, dataset, status, date, and subgroup coverage.</p>
+        </div>
+        <div class="inline-actions">
+          <button id="resetFiltersBtn" type="button" class="secondary-button">Reset</button>
+          <button id="refreshRunsBtn" type="button" class="ghost-button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="filters-grid">
+        <div class="field">
+          <label for="searchInput">Search</label>
+          <input id="searchInput" type="text" placeholder="Run id, document, or dataset" />
+        </div>
+        <div class="field">
+          <label for="documentFilter">Document</label>
+          <select id="documentFilter"></select>
+        </div>
+        <div class="field">
+          <label for="chunkingFilter">Chunking Strategy</label>
+          <select id="chunkingFilter"></select>
+        </div>
+        <div class="field">
+          <label for="datasetFilter">Dataset</label>
+          <select id="datasetFilter"></select>
+        </div>
+        <div class="field">
+          <label for="statusFilter">Status</label>
+          <select id="statusFilter">
+            <option value="">All statuses</option>
+            <option value="queued">Queued</option>
+            <option value="running">Running</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="difficultyFilter">Difficulty</label>
+          <select id="difficultyFilter"></select>
+        </div>
+        <div class="field">
+          <label for="categoryFilter">Category</label>
+          <select id="categoryFilter"></select>
+        </div>
+        <div class="field">
+          <label for="dateFrom">Created From</label>
+          <input id="dateFrom" type="date" />
+        </div>
+        <div class="field">
+          <label for="dateTo">Created To</label>
+          <input id="dateTo" type="date" />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="selection-bar" id="selectionBar">
+        <div id="selectionText">0 runs selected</div>
+        <div class="selection-actions">
+          <button id="compareSelectedBtn" type="button" class="button" disabled>Compare selected runs</button>
+          <button id="clearSelectionBtn" type="button" class="ghost-button">Clear selection</button>
+        </div>
+      </div>
+
+      <div class="table-toolbar">
+        <div class="muted" id="runsMeta">Loading runs...</div>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th><input id="selectAllCheckbox" type="checkbox" /></th>
+              <th><button class="sort-button" type="button" data-sort="run_id">Run</button></th>
+              <th><button class="sort-button" type="button" data-sort="document_name">Document</button></th>
+              <th><button class="sort-button" type="button" data-sort="chunking_strategy">Chunking</button></th>
+              <th><button class="sort-button" type="button" data-sort="dataset_name">Dataset</button></th>
+              <th><button class="sort-button" type="button" data-sort="status">Status</button></th>
+              <th><button class="sort-button" type="button" data-sort="k">K</button></th>
+              <th><button class="sort-button" type="button" data-sort="total_cases">Cases</button></th>
+              <th><button class="sort-button" type="button" data-sort="created_at">Created</button></th>
+              <th><button class="sort-button" type="button" data-sort="hit_at_k_avg">Hit@K</button></th>
+              <th><button class="sort-button" type="button" data-sort="recall_at_k_avg">Recall@K</button></th>
+              <th><button class="sort-button" type="button" data-sort="precision_at_k_avg">Precision@K</button></th>
+              <th><button class="sort-button" type="button" data-sort="mrr_avg">MRR</button></th>
+              <th><button class="sort-button" type="button" data-sort="keyword_coverage_avg">Keyword Coverage</button></th>
+              <th><button class="sort-button" type="button" data-sort="context_relevance_score_avg">Context Relevance</button></th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="runsBody">
+            <tr><td colspan="16" class="loading-state">Loading runs...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const runsState = {
+    items: [],
+    filtered: [],
+    selected: new Set(window.evalAdmin.parseCompareIds()),
+    sortKey: "created_at",
+    sortDir: "desc",
+  };
+
+  const runsEl = {
+    summaryTotal: document.getElementById("summaryTotal"),
+    summaryRunning: document.getElementById("summaryRunning"),
+    summaryCompleted: document.getElementById("summaryCompleted"),
+    summaryFailed: document.getElementById("summaryFailed"),
+    searchInput: document.getElementById("searchInput"),
+    documentFilter: document.getElementById("documentFilter"),
+    chunkingFilter: document.getElementById("chunkingFilter"),
+    datasetFilter: document.getElementById("datasetFilter"),
+    statusFilter: document.getElementById("statusFilter"),
+    difficultyFilter: document.getElementById("difficultyFilter"),
+    categoryFilter: document.getElementById("categoryFilter"),
+    dateFrom: document.getElementById("dateFrom"),
+    dateTo: document.getElementById("dateTo"),
+    resetFiltersBtn: document.getElementById("resetFiltersBtn"),
+    refreshRunsBtn: document.getElementById("refreshRunsBtn"),
+    runsMeta: document.getElementById("runsMeta"),
+    runsBody: document.getElementById("runsBody"),
+    selectAllCheckbox: document.getElementById("selectAllCheckbox"),
+    selectionBar: document.getElementById("selectionBar"),
+    selectionText: document.getElementById("selectionText"),
+    compareSelectedBtn: document.getElementById("compareSelectedBtn"),
+    clearSelectionBtn: document.getElementById("clearSelectionBtn"),
+  };
+
+  function populateSelect(select, values, placeholder) {
+    const current = select.value;
+    const options = ['<option value="">' + window.evalAdmin.escapeHtml(placeholder) + '</option>']
+      .concat((values || []).map(function (value) {
+        return '<option value="' + window.evalAdmin.escapeHtml(value) + '">' + window.evalAdmin.escapeHtml(value) + "</option>";
+      }));
+    select.innerHTML = options.join("");
+    if (current && values.includes(current)) {
+      select.value = current;
+    }
+  }
+
+  function runDifficultyValues(run) {
+    return Object.keys((run.grouped_summary && run.grouped_summary.difficulty) || {});
+  }
+
+  function runCategoryValues(run) {
+    return Object.keys((run.grouped_summary && run.grouped_summary.category) || {});
+  }
+
+  function syncFilterOptions() {
+    populateSelect(runsEl.documentFilter, window.evalAdmin.uniq(runsState.items.map(function (item) {
+      return item.document_name || item.file_id;
+    }).sort()), "All documents");
+    populateSelect(runsEl.chunkingFilter, window.evalAdmin.uniq(runsState.items.map(function (item) {
+      return item.chunking_strategy || "";
+    }).sort()), "All strategies");
+    populateSelect(runsEl.datasetFilter, window.evalAdmin.uniq(runsState.items.map(function (item) {
+      return item.dataset_name;
+    }).sort()), "All datasets");
+    populateSelect(runsEl.difficultyFilter, window.evalAdmin.uniq(runsState.items.flatMap(runDifficultyValues).sort()), "All difficulties");
+    populateSelect(runsEl.categoryFilter, window.evalAdmin.uniq(runsState.items.flatMap(runCategoryValues).sort()), "All categories");
+  }
+
+  function applyFilters() {
+    const search = runsEl.searchInput.value.trim().toLowerCase();
+    const documentValue = runsEl.documentFilter.value;
+    const chunkingValue = runsEl.chunkingFilter.value;
+    const datasetValue = runsEl.datasetFilter.value;
+    const statusValue = runsEl.statusFilter.value;
+    const difficultyValue = runsEl.difficultyFilter.value;
+    const categoryValue = runsEl.categoryFilter.value;
+    const fromValue = runsEl.dateFrom.value ? new Date(runsEl.dateFrom.value + "T00:00:00") : null;
+    const toValue = runsEl.dateTo.value ? new Date(runsEl.dateTo.value + "T23:59:59") : null;
+
+    let items = runsState.items.filter(function (item) {
+      const haystack = [
+        item.run_id,
+        item.document_name,
+        item.file_id,
+        item.dataset_name,
+        item.chunking_strategy,
+      ].join(" ").toLowerCase();
+      if (search && haystack.indexOf(search) === -1) return false;
+      if (documentValue && (item.document_name || item.file_id) !== documentValue) return false;
+      if (chunkingValue && (item.chunking_strategy || "") !== chunkingValue) return false;
+      if (datasetValue && item.dataset_name !== datasetValue) return false;
+      if (statusValue && item.status !== statusValue) return false;
+      if (difficultyValue && runDifficultyValues(item).indexOf(difficultyValue) === -1) return false;
+      if (categoryValue && runCategoryValues(item).indexOf(categoryValue) === -1) return false;
+      const created = item.created_at ? new Date(item.created_at) : null;
+      if (fromValue && created && created < fromValue) return false;
+      if (toValue && created && created > toValue) return false;
+      return true;
+    });
+
+    items.sort(function (a, b) {
+      const valueA = readSortValue(a, runsState.sortKey);
+      const valueB = readSortValue(b, runsState.sortKey);
+      if (valueA < valueB) return runsState.sortDir === "asc" ? -1 : 1;
+      if (valueA > valueB) return runsState.sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    runsState.filtered = items;
+    renderSummary();
+    renderTable();
+  }
+
+  function readSortValue(item, key) {
+    if (key === "hit_at_k_avg") return Number(item.metrics.hit_at_k_avg ?? -1);
+    if (key === "recall_at_k_avg") return Number(item.metrics.recall_at_k_avg ?? -1);
+    if (key === "precision_at_k_avg") return Number(item.metrics.precision_at_k_avg ?? -1);
+    if (key === "mrr_avg") return Number(item.metrics.mrr_avg ?? -1);
+    if (key === "keyword_coverage_avg") return Number(item.metrics.keyword_coverage_avg ?? -1);
+    if (key === "context_relevance_score_avg") return Number(item.metrics.context_relevance_score_avg ?? -1);
+    if (key === "created_at") return new Date(item.created_at || 0).getTime();
+    return String(item[key] || "").toLowerCase();
+  }
+
+  function renderSummary() {
+    const total = runsState.filtered.length;
+    const running = runsState.filtered.filter(function (item) {
+      return item.status === "running" || item.status === "queued";
+    }).length;
+    const completed = runsState.filtered.filter(function (item) { return item.status === "completed"; }).length;
+    const failed = runsState.filtered.filter(function (item) { return item.status === "failed"; }).length;
+    runsEl.summaryTotal.textContent = window.evalAdmin.formatCount(total);
+    runsEl.summaryRunning.textContent = window.evalAdmin.formatCount(running);
+    runsEl.summaryCompleted.textContent = window.evalAdmin.formatCount(completed);
+    runsEl.summaryFailed.textContent = window.evalAdmin.formatCount(failed);
+    runsEl.runsMeta.textContent = "Showing " + total + " of " + runsState.items.length + " run(s).";
+  }
+
+  function renderTable() {
+    if (!runsState.filtered.length) {
+      runsEl.runsBody.innerHTML = '<tr><td colspan="16" class="empty-state">No runs match the current filters.</td></tr>';
+      syncSelectionBar();
+      return;
+    }
+    runsEl.runsBody.innerHTML = runsState.filtered.map(function (item) {
+      const isSelected = runsState.selected.has(item.run_id);
+      return [
+        '<tr class="' + (isSelected ? "table-row-selected" : "") + '">',
+        '  <td><input type="checkbox" data-run-id="' + window.evalAdmin.escapeHtml(item.run_id) + '" ' + (isSelected ? "checked" : "") + " /></td>",
+        '  <td><div class="mono">' + window.evalAdmin.escapeHtml(item.run_id) + '</div></td>',
+        '  <td><div>' + window.evalAdmin.escapeHtml(item.document_name || item.file_id) + '</div><div class="muted mono">' + window.evalAdmin.escapeHtml(item.file_id) + "</div></td>",
+        '  <td>' + window.evalAdmin.escapeHtml(item.chunking_strategy || "-") + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(item.dataset_name) + "</td>",
+        '  <td>' + window.evalAdmin.renderBadge(item.status) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(item.k) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(item.total_cases) + "</td>",
+        '  <td><div>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatDateTime(item.created_at)) + "</div></td>",
+        '  <td>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.metrics.hit_at_k_avg)) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.metrics.recall_at_k_avg)) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.metrics.precision_at_k_avg)) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.metrics.mrr_avg)) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.metrics.keyword_coverage_avg)) + "</td>",
+        '  <td>' + window.evalAdmin.escapeHtml(window.evalAdmin.formatMetric(item.metrics.context_relevance_score_avg, 2)) + "</td>",
+        '  <td><div class="table-actions">',
+        '    <a class="ghost-button" href="/evaluations/' + encodeURIComponent(item.run_id) + '/ui">View run</a>',
+        '    <button type="button" class="secondary-button" data-compare-run="' + window.evalAdmin.escapeHtml(item.run_id) + '">Compare</button>',
+        '    <a class="secondary-button" href="/evaluations-create-ui?source_run_id=' + encodeURIComponent(item.run_id) + '">Duplicate config</a>',
+        '    <button type="button" class="danger-button" data-delete-run="' + window.evalAdmin.escapeHtml(item.run_id) + '">Delete</button>',
+        "  </div></td>",
+        "</tr>",
+      ].join("");
+    }).join("");
+    runsEl.selectAllCheckbox.checked = runsState.filtered.length > 0 && runsState.filtered.every(function (item) {
+      return runsState.selected.has(item.run_id);
+    });
+    syncSelectionBar();
+  }
+
+  function syncSelectionBar() {
+    const count = runsState.selected.size;
+    runsEl.selectionBar.classList.toggle("is-visible", count > 0);
+    runsEl.selectionText.textContent = count + " run" + (count === 1 ? "" : "s") + " selected";
+    runsEl.compareSelectedBtn.disabled = count < 2;
+  }
+
+  async function loadRuns() {
+    runsEl.runsMeta.textContent = "Loading runs...";
+    const payload = await window.uiAuth.apiFetch("/evaluations?limit=500&offset=0");
+    runsState.items = payload.items || [];
+    syncFilterOptions();
+    applyFilters();
+  }
+
+  function resetFilters() {
+    runsEl.searchInput.value = "";
+    runsEl.documentFilter.value = "";
+    runsEl.chunkingFilter.value = "";
+    runsEl.datasetFilter.value = "";
+    runsEl.statusFilter.value = "";
+    runsEl.difficultyFilter.value = "";
+    runsEl.categoryFilter.value = "";
+    runsEl.dateFrom.value = "";
+    runsEl.dateTo.value = "";
+    applyFilters();
+  }
+
+  async function deleteRun(runId) {
+    await window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(runId), {
+      method: "DELETE",
+    });
+    runsState.selected.delete(runId);
+    await loadRuns();
+  }
+
+  document.querySelectorAll("[data-sort]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      const key = button.getAttribute("data-sort");
+      if (!key) return;
+      if (runsState.sortKey === key) {
+        runsState.sortDir = runsState.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        runsState.sortKey = key;
+        runsState.sortDir = key === "created_at" ? "desc" : "asc";
+      }
+      applyFilters();
+    });
+  });
+
+  [
+    runsEl.searchInput,
+    runsEl.documentFilter,
+    runsEl.chunkingFilter,
+    runsEl.datasetFilter,
+    runsEl.statusFilter,
+    runsEl.difficultyFilter,
+    runsEl.categoryFilter,
+    runsEl.dateFrom,
+    runsEl.dateTo,
+  ].forEach(function (input) {
+    input.addEventListener("input", applyFilters);
+    input.addEventListener("change", applyFilters);
+  });
+
+  runsEl.resetFiltersBtn.addEventListener("click", resetFilters);
+  runsEl.refreshRunsBtn.addEventListener("click", loadRuns);
+  runsEl.clearSelectionBtn.addEventListener("click", function () {
+    runsState.selected.clear();
+    renderTable();
+  });
+  runsEl.compareSelectedBtn.addEventListener("click", function () {
+    if (runsState.selected.size < 2) return;
+    window.location.href = window.evalAdmin.compareIdsToQuery(Array.from(runsState.selected));
+  });
+  runsEl.selectAllCheckbox.addEventListener("change", function () {
+    runsState.filtered.forEach(function (item) {
+      if (runsEl.selectAllCheckbox.checked) {
+        runsState.selected.add(item.run_id);
+      } else {
+        runsState.selected.delete(item.run_id);
+      }
+    });
+    renderTable();
+  });
+
+  runsEl.runsBody.addEventListener("click", async function (event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const compareRunId = target.getAttribute("data-compare-run");
+    if (compareRunId) {
+      const merged = window.evalAdmin.uniq(Array.from(runsState.selected).concat([compareRunId]));
+      window.location.href = window.evalAdmin.compareIdsToQuery(merged);
+      return;
+    }
+    const deleteRunId = target.getAttribute("data-delete-run");
+    if (deleteRunId) {
+      if (!window.confirm("Delete this evaluation run?")) return;
+      try {
+        await deleteRun(deleteRunId);
+      } catch (err) {
+        runsEl.runsMeta.textContent = String(err && err.message ? err.message : err);
+      }
+    }
+  });
+
+  runsEl.runsBody.addEventListener("change", function (event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    const runId = target.getAttribute("data-run-id");
+    if (!runId) return;
+    if (target.checked) runsState.selected.add(runId);
+    else runsState.selected.delete(runId);
+    renderTable();
+  });
+
+  (async function init() {
+    try {
+      await loadRuns();
+    } catch (err) {
+      runsEl.runsBody.innerHTML = '<tr><td colspan="16" class="error-state">' + window.evalAdmin.escapeHtml(String(err && err.message ? err.message : err)) + "</td></tr>";
+      runsEl.runsMeta.textContent = "Unable to load runs.";
+    }
+  })();
+</script>
+{% endblock %}

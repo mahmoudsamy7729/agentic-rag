@@ -72,6 +72,24 @@ class DocumentsRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_owned_documents_by_ids(
+        self,
+        *,
+        owner_user_id: UUID,
+        doc_ids: list[str],
+        include_deleted: bool = False,
+    ) -> list[Document]:
+        if not doc_ids:
+            return []
+        stmt = select(Document).where(
+            Document.owner_user_id == owner_user_id,
+            Document.id.in_(doc_ids),
+        )
+        if not include_deleted:
+            stmt = stmt.where(Document.deleted_at.is_(None))
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def soft_delete_owned_document(
         self,
         *,

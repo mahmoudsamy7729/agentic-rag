@@ -8,6 +8,9 @@ class DocumentItem(BaseModel):
     doc_id: str = Field(description="Document identifier.")
     owner_user_id: UUID = Field(description="Owner user id.")
     source: str | None = Field(default=None, description="Document source label.")
+    chunking_strategy: str | None = Field(default=None, description="Chunking strategy used for indexing.")
+    chunk_size: int | None = Field(default=None, description="Chunk size used for indexing.")
+    chunk_overlap: int | None = Field(default=None, description="Chunk overlap used for indexing.")
     created_at: datetime = Field(description="Document creation timestamp.")
     updated_at: datetime = Field(description="Document update timestamp.")
     deleted_at: datetime | None = Field(
