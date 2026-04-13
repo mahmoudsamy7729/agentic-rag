@@ -59,6 +59,12 @@ class EvaluationRunDetailResponse(BaseModel):
     item: EvaluationRunItem
 
 
+class EvaluationRunRerunResponse(BaseModel):
+    status: str
+    item: EvaluationRunItem
+    rerun_case_count: int
+
+
 class EvaluationCaseItem(BaseModel):
     case_id: UUID
     case_index: int

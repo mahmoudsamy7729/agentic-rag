@@ -62,6 +62,42 @@ class FakeJudge:
         )
 
 
+class FlakyRetriever:
+    def __init__(self) -> None:
+        self._attempts: dict[str, int] = {}
+
+    async def retrieve(self, *, question: str, file_id: str, k: int):
+        self._attempts[question] = self._attempts.get(question, 0) + 1
+        if "support" in question.lower() and self._attempts[question] == 1:
+            raise RuntimeError("temporary retriever failure")
+        if "refund" in question.lower():
+            return [
+                RetrievedChunk(
+                    doc_id=file_id,
+                    chunk_id="chunk-1",
+                    source="policy",
+                    text="Customers can request a refund within 30 days.",
+                    score=0.9,
+                ),
+                RetrievedChunk(
+                    doc_id=file_id,
+                    chunk_id="chunk-2",
+                    source="policy",
+                    text="A refund applies only if the subscription was not used.",
+                    score=0.8,
+                ),
+            ][:k]
+        return [
+            RetrievedChunk(
+                doc_id=file_id,
+                chunk_id="chunk-3",
+                source="policy",
+                text="Support hours are Monday to Friday.",
+                score=0.7,
+            )
+        ][:k]
+
+
 @dataclass
 class FakeUser:
     id: UUID
@@ -184,3 +220,87 @@ async def _prepare_db(engine, session_factory, seed_fn):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await seed_fn(session_factory)
+
+
+def test_retrieval_evaluation_rerun_failed_cases_api_flow():
+    temp_db = Path(tempfile.mkdtemp(prefix="eval-rerun-api-", dir=".")) / "test.db"
+    database_url = f"sqlite+aiosqlite:///{temp_db.as_posix()}"
+    dataset_dir = Path(tempfile.mkdtemp(prefix="eval-rerun-api-data-", dir="."))
+    owner_id = uuid4()
+
+    async def _seed(session_factory):
+        async with session_factory() as session:
+            session.add(
+                User(
+                    id=owner_id,
+                    email="owner@example.com",
+                    hashed_password="hashed",
+                    is_active=True,
+                    is_superuser=False,
+                    is_verified=False,
+                )
+            )
+            session.add(Document(id="doc-1", owner_user_id=owner_id, source="policy"))
+            await session.commit()
+
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+    import asyncio
+
+    asyncio.run(_prepare_db(engine, session_factory, _seed))
+
+    retriever = FlakyRetriever()
+    service = RetrievalEvaluationService(
+        session_factory=session_factory,
+        dataset_storage_dir=str(dataset_dir),
+        retriever_factory=lambda: retriever,
+        judge_factory=lambda: FakeJudge(),
+    )
+    app.dependency_overrides[deps.get_retrieval_evaluation_service] = lambda: service
+    app.dependency_overrides[active_user] = lambda: FakeUser(id=owner_id)
+    app.dependency_overrides[get_documents_repository] = lambda: FakeDocumentsRepository(
+        owner_user_id=owner_id,
+        doc_id="doc-1",
+    )
+
+    client = TestClient(app)
+    dataset_bytes = (
+        b'{"question":"What is the refund policy?","answer":"Users can request a refund within 30 days if the subscription was not used.","must_include_keywords":["refund","30","days","subscription","used"],"must_include_phrases":["refund within 30 days","subscription was not used"],"difficulty":"easy","category":"billing"}\n'
+        b'{"question":"What are the support hours?","answer":"Support hours are Monday to Friday.","must_include_keywords":["support","monday","friday"],"must_include_phrases":["Monday to Friday"],"difficulty":"easy","category":"support"}\n'
+    )
+
+    try:
+        create = client.post(
+            "/evaluations/retrieval",
+            data={"file_id": "doc-1", "k": "2"},
+            files={"dataset_file": ("dataset.jsonl", dataset_bytes, "application/json")},
+        )
+        assert create.status_code == 202
+        run_id = create.json()["item"]["run_id"]
+
+        cases = client.get(f"/evaluations/{run_id}/cases")
+        assert cases.status_code == 200
+        statuses = {item["question"]: item["status"] for item in cases.json()["items"]}
+        assert statuses["What is the refund policy?"] == "completed"
+        assert statuses["What are the support hours?"] == "failed"
+
+        rerun = client.post(f"/evaluations/{run_id}/rerun-failed")
+        assert rerun.status_code == 202
+        rerun_body = rerun.json()
+        assert rerun_body["status"] == "accepted"
+        assert rerun_body["rerun_case_count"] == 1
+        assert rerun_body["item"]["status"] == "queued"
+
+        rerun_again = client.post(f"/evaluations/{run_id}/rerun-failed")
+        assert rerun_again.status_code == 422
+
+        final_cases = client.get(f"/evaluations/{run_id}/cases")
+        assert final_cases.status_code == 200
+        assert all(item["status"] == "completed" for item in final_cases.json()["items"])
+
+        missing = client.post(f"/evaluations/{uuid4()}/rerun-failed")
+        assert missing.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())
