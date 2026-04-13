@@ -49,6 +49,14 @@ class CreateRetrievalEvaluationRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RerunFailedCasesResult:
+    run_id: UUID
+    status: str
+    rerun_case_count: int
+    case_ids: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
 class StoredRetrievalDataset:
     dataset_sha256: str
     dataset_name: str
@@ -146,144 +154,13 @@ class RetrievalEvaluationService:
         )
 
     async def process_run(self, *, run_id: UUID) -> None:
-        retriever = self._retriever_factory()
-
         async with self._session_factory() as session:
             repository = EvaluationRepository(session)
             run = await repository.get_run(run_id=run_id)
             if run is None:
                 return
             try:
-                await repository.mark_run_started(run=run)
-                await repository.commit()
-
-                normalization_config = TextNormalizationConfig(
-                    strip_punctuation=bool(run.config_snapshot.get("strip_punctuation", True))
-                )
-                useful_chunk_config = UsefulChunkConfig(
-                    min_keyword_hits=int(run.config_snapshot.get("min_keyword_hits", 2)),
-                    min_keyword_ratio=float(run.config_snapshot.get("min_keyword_ratio", 0.4)),
-                )
-                store_chunk_texts = bool(
-                    run.config_snapshot.get("store_retrieved_chunk_texts", False)
-                )
-                judge = (
-                    self._judge_factory()
-                    if bool(run.config_snapshot.get("judge_enabled", True))
-                    else None
-                )
-
-                cases = await repository.list_cases_for_run(run_id=run.id)
-                processed = 0
-                for case in cases:
-                    try:
-                        retrieved_chunks = await retriever.retrieve(
-                            question=case.question,
-                            file_id=run.doc_id,
-                            k=run.k,
-                        )
-                        metrics = compute_retrieval_metrics(
-                            retrieved_chunks=retrieved_chunks,
-                            must_include_phrases=case.must_include_phrases,
-                            must_include_keywords=case.must_include_keywords,
-                            k=run.k,
-                            normalization_config=normalization_config,
-                            useful_chunk_config=useful_chunk_config,
-                        )
-                        judge_result = None
-                        if judge is not None:
-                            judge_result = await judge.judge(
-                                question=case.question,
-                                retrieved_chunks=[
-                                    {
-                                        "chunk_id": chunk.chunk_id,
-                                        "text": chunk.text,
-                                    }
-                                    for chunk in retrieved_chunks
-                                ],
-                            )
-                        await repository.mark_case_completed(
-                            case=case,
-                            retrieved_chunk_ids=[chunk.chunk_id for chunk in retrieved_chunks],
-                            retrieved_chunk_texts=(
-                                [chunk.text for chunk in retrieved_chunks]
-                                if store_chunk_texts
-                                else []
-                            ),
-                            matched_phrases=metrics.matched_phrases,
-                            matched_keywords=metrics.matched_keywords,
-                            hit_at_k=metrics.hit_at_k,
-                            recall_at_k=metrics.recall_at_k,
-                            precision_at_k=metrics.precision_at_k,
-                            mrr=metrics.mrr,
-                            keyword_coverage=metrics.keyword_coverage,
-                            context_relevance_score=(
-                                judge_result.score if judge_result is not None else None
-                            ),
-                            context_relevance_explanation=(
-                                judge_result.explanation if judge_result is not None else None
-                            ),
-                            first_correct_rank=metrics.first_correct_rank,
-                            useful_chunk_count=metrics.useful_chunk_count,
-                        )
-                    except Exception as exc:
-                        await repository.mark_case_failed(case=case, error_message=str(exc))
-                    processed += 1
-                    await repository.update_processed_count(
-                        run=run,
-                        processed_cases=processed,
-                    )
-                    await repository.commit()
-
-                refreshed_cases = await repository.list_cases_for_run(run_id=run.id)
-                aggregate_cases = [
-                    {
-                        "category": case.category,
-                        "difficulty": case.difficulty,
-                        "hit_at_k": case.hit_at_k,
-                        "recall_at_k": case.recall_at_k,
-                        "precision_at_k": case.precision_at_k,
-                        "mrr": case.mrr,
-                        "keyword_coverage": case.keyword_coverage,
-                        "context_relevance_score": case.context_relevance_score,
-                    }
-                    for case in refreshed_cases
-                    if case.status == "completed"
-                ]
-                await repository.mark_run_completed(
-                    run=run,
-                    hit_at_k_avg=aggregate_metric_average(
-                        case.get("hit_at_k") for case in aggregate_cases
-                    )
-                    or 0.0,
-                    recall_at_k_avg=aggregate_metric_average(
-                        case.get("recall_at_k") for case in aggregate_cases
-                    )
-                    or 0.0,
-                    precision_at_k_avg=aggregate_metric_average(
-                        case.get("precision_at_k") for case in aggregate_cases
-                    )
-                    or 0.0,
-                    mrr_avg=aggregate_metric_average(case.get("mrr") for case in aggregate_cases)
-                    or 0.0,
-                    keyword_coverage_avg=aggregate_metric_average(
-                        case.get("keyword_coverage") for case in aggregate_cases
-                    )
-                    or 0.0,
-                    context_relevance_score_avg=aggregate_metric_average(
-                        case.get("context_relevance_score") for case in aggregate_cases
-                    ),
-                    grouped_summary={
-                        "category": grouped_metric_summary(
-                            cases=aggregate_cases,
-                            field_name="category",
-                        ),
-                        "difficulty": grouped_metric_summary(
-                            cases=aggregate_cases,
-                            field_name="difficulty",
-                        ),
-                    },
-                )
+                await self._process_run_cases(repository=repository, run=run, cases=None)
                 await repository.commit()
             except Exception as exc:
                 await repository.rollback()
@@ -291,6 +168,68 @@ class RetrievalEvaluationService:
                 if failed_run is not None:
                     await repository.mark_run_failed(run=failed_run, error_message=str(exc))
                     await repository.commit()
+
+    async def process_selected_cases(self, *, run_id: UUID, case_ids: list[UUID]) -> None:
+        async with self._session_factory() as session:
+            repository = EvaluationRepository(session)
+            run = await repository.get_run(run_id=run_id)
+            if run is None:
+                return
+            try:
+                target_case_ids = set(case_ids)
+                cases = [
+                    case
+                    for case in await repository.list_cases_for_run(run_id=run.id)
+                    if case.id in target_case_ids
+                ]
+                if not cases:
+                    await self._finalize_run(repository=repository, run=run)
+                    await repository.commit()
+                    return
+                await self._process_run_cases(repository=repository, run=run, cases=cases)
+                await repository.commit()
+            except Exception as exc:
+                await repository.rollback()
+                failed_run = await repository.get_run(run_id=run_id)
+                if failed_run is not None:
+                    await repository.mark_run_failed(run=failed_run, error_message=str(exc))
+                    await repository.commit()
+
+    async def rerun_failed_cases(
+        self,
+        *,
+        owner_user_id: UUID,
+        run_id: UUID,
+    ) -> RerunFailedCasesResult:
+        async with self._session_factory() as session:
+            repository = EvaluationRepository(session)
+            run = await repository.get_owned_run(owner_user_id=owner_user_id, run_id=run_id)
+            if run is None:
+                raise LookupError("Evaluation run not found.")
+            if run.status in {"queued", "running"}:
+                raise ValueError("Evaluation run is already in progress.")
+
+            failed_cases = await repository.list_failed_cases_for_run(run_id=run.id)
+            if not failed_cases:
+                raise RuntimeError("This evaluation run has no failed cases to rerun.")
+
+            for case in failed_cases:
+                await repository.reset_case_for_rerun(case=case)
+
+            completed_case_count = sum(
+                1 for case in await repository.list_cases_for_run(run_id=run.id) if case.status == "completed"
+            )
+            await repository.reset_run_for_rerun(
+                run=run,
+                processed_cases=completed_case_count,
+            )
+            await repository.commit()
+            return RerunFailedCasesResult(
+                run_id=run.id,
+                status=run.status,
+                rerun_case_count=len(failed_cases),
+                case_ids=[case.id for case in failed_cases],
+            )
 
     async def list_runs(
         self,
@@ -461,4 +400,163 @@ class RetrievalEvaluationService:
             created_at=created_at,
             last_used_at=last_used_at,
             run_count=len(runs),
+        )
+
+    async def _process_run_cases(
+        self,
+        *,
+        repository: EvaluationRepository,
+        run: EvaluationRun,
+        cases: list[EvaluationCase] | None,
+    ) -> None:
+        retriever = self._retriever_factory()
+        normalization_config = TextNormalizationConfig(
+            strip_punctuation=bool(run.config_snapshot.get("strip_punctuation", True))
+        )
+        useful_chunk_config = UsefulChunkConfig(
+            min_keyword_hits=int(run.config_snapshot.get("min_keyword_hits", 2)),
+            min_keyword_ratio=float(run.config_snapshot.get("min_keyword_ratio", 0.4)),
+        )
+        store_chunk_texts = bool(run.config_snapshot.get("store_retrieved_chunk_texts", False))
+        judge = (
+            self._judge_factory()
+            if bool(run.config_snapshot.get("judge_enabled", True))
+            else None
+        )
+
+        await repository.mark_run_started(run=run)
+        await repository.commit()
+
+        target_cases = cases if cases is not None else await repository.list_cases_for_run(run_id=run.id)
+        processed = int(run.processed_cases)
+        for case in target_cases:
+            await self._execute_case(
+                repository=repository,
+                retriever=retriever,
+                judge=judge,
+                run=run,
+                case=case,
+                normalization_config=normalization_config,
+                useful_chunk_config=useful_chunk_config,
+                store_chunk_texts=store_chunk_texts,
+            )
+            processed += 1
+            await repository.update_processed_count(run=run, processed_cases=processed)
+            await repository.commit()
+
+        await self._finalize_run(repository=repository, run=run)
+
+    async def _execute_case(
+        self,
+        *,
+        repository: EvaluationRepository,
+        retriever: EvaluationRetriever,
+        judge: ContextRelevanceJudge | None,
+        run: EvaluationRun,
+        case: EvaluationCase,
+        normalization_config: TextNormalizationConfig,
+        useful_chunk_config: UsefulChunkConfig,
+        store_chunk_texts: bool,
+    ) -> None:
+        try:
+            retrieved_chunks = await retriever.retrieve(
+                question=case.question,
+                file_id=run.doc_id,
+                k=run.k,
+            )
+            metrics = compute_retrieval_metrics(
+                retrieved_chunks=retrieved_chunks,
+                must_include_phrases=case.must_include_phrases,
+                must_include_keywords=case.must_include_keywords,
+                k=run.k,
+                normalization_config=normalization_config,
+                useful_chunk_config=useful_chunk_config,
+            )
+            judge_result = None
+            if judge is not None:
+                judge_result = await judge.judge(
+                    question=case.question,
+                    retrieved_chunks=[
+                        {
+                            "chunk_id": chunk.chunk_id,
+                            "text": chunk.text,
+                        }
+                        for chunk in retrieved_chunks
+                    ],
+                )
+            await repository.mark_case_completed(
+                case=case,
+                retrieved_chunk_ids=[chunk.chunk_id for chunk in retrieved_chunks],
+                retrieved_chunk_texts=(
+                    [chunk.text for chunk in retrieved_chunks] if store_chunk_texts else []
+                ),
+                matched_phrases=metrics.matched_phrases,
+                matched_keywords=metrics.matched_keywords,
+                hit_at_k=metrics.hit_at_k,
+                recall_at_k=metrics.recall_at_k,
+                precision_at_k=metrics.precision_at_k,
+                mrr=metrics.mrr,
+                keyword_coverage=metrics.keyword_coverage,
+                context_relevance_score=judge_result.score if judge_result is not None else None,
+                context_relevance_explanation=(
+                    judge_result.explanation if judge_result is not None else None
+                ),
+                first_correct_rank=metrics.first_correct_rank,
+                useful_chunk_count=metrics.useful_chunk_count,
+            )
+        except Exception as exc:
+            await repository.mark_case_failed(case=case, error_message=str(exc))
+
+    async def _finalize_run(
+        self,
+        *,
+        repository: EvaluationRepository,
+        run: EvaluationRun,
+    ) -> None:
+        refreshed_cases = await repository.list_cases_for_run(run_id=run.id)
+        aggregate_cases = [
+            {
+                "category": case.category,
+                "difficulty": case.difficulty,
+                "hit_at_k": case.hit_at_k,
+                "recall_at_k": case.recall_at_k,
+                "precision_at_k": case.precision_at_k,
+                "mrr": case.mrr,
+                "keyword_coverage": case.keyword_coverage,
+                "context_relevance_score": case.context_relevance_score,
+            }
+            for case in refreshed_cases
+            if case.status == "completed"
+        ]
+        await repository.mark_run_completed(
+            run=run,
+            hit_at_k_avg=aggregate_metric_average(case.get("hit_at_k") for case in aggregate_cases)
+            or 0.0,
+            recall_at_k_avg=aggregate_metric_average(
+                case.get("recall_at_k") for case in aggregate_cases
+            )
+            or 0.0,
+            precision_at_k_avg=aggregate_metric_average(
+                case.get("precision_at_k") for case in aggregate_cases
+            )
+            or 0.0,
+            mrr_avg=aggregate_metric_average(case.get("mrr") for case in aggregate_cases)
+            or 0.0,
+            keyword_coverage_avg=aggregate_metric_average(
+                case.get("keyword_coverage") for case in aggregate_cases
+            )
+            or 0.0,
+            context_relevance_score_avg=aggregate_metric_average(
+                case.get("context_relevance_score") for case in aggregate_cases
+            ),
+            grouped_summary={
+                "category": grouped_metric_summary(
+                    cases=aggregate_cases,
+                    field_name="category",
+                ),
+                "difficulty": grouped_metric_summary(
+                    cases=aggregate_cases,
+                    field_name="difficulty",
+                ),
+            },
         )

@@ -24,7 +24,7 @@ Main UI pages:
 - `/ask-ui` - single-turn ask UI with citations, cache status, and refined query
 - `/evaluation-ui` - create evaluation runs
 - `/evaluation-history-ui` - compare historical runs
-- `/evaluation-runs/{run_id}/ui` - inspect cases and rerun failed ones
+- `/evaluations/{run_id}/ui` - inspect cases and rerun failed ones in place
 
 Demo video:
 
@@ -157,7 +157,6 @@ Core endpoints:
 - `GET /evaluations`
 - `GET /evaluations/{run_id}`
 - `GET /evaluations/{run_id}/cases`
-- `GET /evaluations/{run_id}/report`
 - `POST /evaluations/{run_id}/rerun-failed`
 - `GET /llm/health`
 - `GET /tools/health`
@@ -269,6 +268,7 @@ The response includes:
 - upload a JSONL dataset
 - select a `doc_id`
 - start a run and monitor progress
+- rerun failed cases directly from the run detail page when needed
 - inspect `/evaluation-history-ui` for comparisons
 
 ## Evaluation

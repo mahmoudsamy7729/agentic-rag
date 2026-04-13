@@ -146,15 +146,16 @@
         <div class="panel-head">
           <div>
             <h3>Run Notes</h3>
-            <p>Space is reserved for retry and export controls as backend support expands.</p>
+            <p>Retry only the failed cases in-place, keep completed results, and continue monitoring from this run.</p>
           </div>
         </div>
         <div class="chip-list" id="runMetaChips"></div>
         <div class="inline-actions" style="margin-top:16px;">
-          <button type="button" class="secondary-button" disabled>Retry failed cases</button>
+          <button id="rerunFailedBtn" type="button" class="secondary-button" disabled>Retry failed cases</button>
           <button type="button" class="secondary-button" disabled>Retry judge only</button>
           <button type="button" class="secondary-button" disabled>Export case results</button>
         </div>
+        <div id="rerunFeedback" class="help-text" style="margin-top:16px;"></div>
         <div id="runErrorBox" class="help-text" style="margin-top:16px;"></div>
       </div>
     </aside>
@@ -250,6 +251,8 @@
     lowScoreOnlyToggle: document.getElementById("lowScoreOnlyToggle"),
     casesBody: document.getElementById("casesBody"),
     runMetaChips: document.getElementById("runMetaChips"),
+    rerunFailedBtn: document.getElementById("rerunFailedBtn"),
+    rerunFeedback: document.getElementById("rerunFeedback"),
     runErrorBox: document.getElementById("runErrorBox"),
     caseDrawerBackdrop: document.getElementById("caseDrawerBackdrop"),
     caseDrawer: document.getElementById("caseDrawer"),
@@ -330,6 +333,7 @@
     detailEl.runningCases.textContent = String(counts.running);
     detailEl.completedCases.textContent = String(counts.completed);
     detailEl.failedCountText.textContent = "Failed cases: " + counts.failed;
+    detailEl.rerunFailedBtn.disabled = counts.failed === 0 || run.status === "queued" || run.status === "running";
     detailEl.runMetaChips.innerHTML = [
       '<span class="chip">Dataset SHA ' + window.evalAdmin.escapeHtml(run.dataset_sha256.slice(0, 12)) + "...</span>",
       '<span class="chip">Created ' + window.evalAdmin.escapeHtml(window.evalAdmin.formatDate(run.created_at)) + "</span>",
@@ -437,6 +441,22 @@
     detailState.pollTimer = window.setTimeout(loadRun, 5000);
   }
 
+  async function rerunFailedCases() {
+    window.evalAdmin.setBusy(detailEl.rerunFailedBtn, true, "Retrying...");
+    detailEl.rerunFeedback.textContent = "";
+    try {
+      const payload = await window.uiAuth.apiFetch("/evaluations/" + encodeURIComponent(runId) + "/rerun-failed", {
+        method: "POST",
+      });
+      detailEl.rerunFeedback.textContent = "Queued " + payload.rerun_case_count + " failed case(s) for rerun.";
+      await loadRun();
+    } catch (err) {
+      detailEl.rerunFeedback.textContent = String(err && err.message ? err.message : err);
+    } finally {
+      window.evalAdmin.setBusy(detailEl.rerunFailedBtn, false);
+    }
+  }
+
   [
     detailEl.caseSearch,
     detailEl.caseStatusFilter,
@@ -450,6 +470,7 @@
   });
 
   detailEl.refreshRunBtn.addEventListener("click", loadRun);
+  detailEl.rerunFailedBtn.addEventListener("click", rerunFailedCases);
   detailEl.closeDrawerBtn.addEventListener("click", closeDrawer);
   detailEl.caseDrawerBackdrop.addEventListener("click", closeDrawer);
   detailEl.casesBody.addEventListener("click", function (event) {

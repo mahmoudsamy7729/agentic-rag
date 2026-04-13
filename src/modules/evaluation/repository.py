@@ -123,9 +123,28 @@ class EvaluationRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_failed_cases_for_run(self, *, run_id: UUID) -> list[EvaluationCase]:
+        stmt: Select[tuple[EvaluationCase]] = (
+            select(EvaluationCase)
+            .where(
+                EvaluationCase.run_id == run_id,
+                EvaluationCase.status == "failed",
+            )
+            .order_by(EvaluationCase.case_index.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def mark_run_started(self, *, run: EvaluationRun) -> None:
         run.status = "running"
         run.started_at = datetime.now(timezone.utc)
+        run.error_message = None
+        await self._session.flush()
+
+    async def reset_run_for_rerun(self, *, run: EvaluationRun, processed_cases: int) -> None:
+        run.status = "queued"
+        run.processed_cases = processed_cases
+        run.finished_at = None
         run.error_message = None
         await self._session.flush()
 
@@ -167,6 +186,24 @@ class EvaluationRepository:
     async def mark_case_failed(self, *, case: EvaluationCase, error_message: str) -> None:
         case.status = "failed"
         case.error_message = error_message
+        await self._session.flush()
+
+    async def reset_case_for_rerun(self, *, case: EvaluationCase) -> None:
+        case.status = "queued"
+        case.retrieved_chunk_ids = []
+        case.retrieved_chunk_texts = []
+        case.matched_phrases = []
+        case.matched_keywords = []
+        case.hit_at_k = None
+        case.recall_at_k = None
+        case.precision_at_k = None
+        case.mrr = None
+        case.keyword_coverage = None
+        case.context_relevance_score = None
+        case.context_relevance_explanation = None
+        case.first_correct_rank = None
+        case.useful_chunk_count = None
+        case.error_message = None
         await self._session.flush()
 
     async def update_processed_count(self, *, run: EvaluationRun, processed_cases: int) -> None:

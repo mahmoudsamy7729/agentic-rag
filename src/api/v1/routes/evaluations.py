@@ -21,6 +21,7 @@ from src.api.v1.schemas.evaluation import (
     EvaluationRunDetailResponse,
     EvaluationRunItem,
     EvaluationRunListResponse,
+    EvaluationRunRerunResponse,
 )
 from src.modules.documents import DocumentsRepositoryDep
 from src.modules.evaluation.dataset import DatasetValidationError
@@ -170,6 +171,50 @@ async def delete_evaluation(
     if not deleted:
         raise HTTPException(status_code=404, detail="Evaluation run not found.")
     return EvaluationRunDeleteResponse(status="ok", run_id=run_id, deleted=True)
+
+
+@router.post(
+    "/evaluations/{run_id}/rerun-failed",
+    response_model=EvaluationRunRerunResponse,
+    status_code=202,
+)
+async def rerun_failed_evaluation_cases(
+    run_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: ActiveUserDep,
+    documents_repository: DocumentsRepositoryDep,
+    evaluation_service: RetrievalEvaluationServiceDep,
+):
+    try:
+        result = await evaluation_service.rerun_failed_cases(
+            owner_user_id=current_user.id,
+            run_id=run_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    background_tasks.add_task(
+        evaluation_service.process_selected_cases,
+        run_id=result.run_id,
+        case_ids=result.case_ids,
+    )
+    run = await evaluation_service.get_run(owner_user_id=current_user.id, run_id=result.run_id)
+    if run is None:
+        raise HTTPException(status_code=500, detail="Evaluation run could not be loaded.")
+    document = await documents_repository.get_owned_document(
+        owner_user_id=current_user.id,
+        doc_id=run.doc_id,
+        include_deleted=True,
+    )
+    return EvaluationRunRerunResponse(
+        status="accepted",
+        item=_to_run_item(run=run, document=document),
+        rerun_case_count=result.rerun_case_count,
+    )
 
 
 @router.get("/evaluations/{run_id}/cases", response_model=EvaluationCaseListResponse)
