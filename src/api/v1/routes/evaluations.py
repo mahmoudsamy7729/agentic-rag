@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from src.api.v1.dependencies import RetrievalEvaluationServiceDep
 from src.api.v1.schemas.evaluation import (
     EvaluationCaseItem,
     EvaluationCaseListResponse,
+    EvaluationDatasetDeleteResponse,
+    EvaluationDatasetItem,
+    EvaluationDatasetListResponse,
+    EvaluationDatasetPreviewItem,
+    EvaluationDatasetPreviewResponse,
     EvaluationMetricSummary,
+    EvaluationRunDeleteResponse,
     EvaluationRunDetailResponse,
     EvaluationRunItem,
     EvaluationRunListResponse,
@@ -31,7 +39,8 @@ async def create_retrieval_evaluation(
     evaluation_service: RetrievalEvaluationServiceDep,
     file_id: Annotated[str, Form()],
     k: Annotated[int, Form(ge=1, le=100)],
-    dataset_file: Annotated[UploadFile, File()],
+    dataset_file: Annotated[UploadFile | None, File()] = None,
+    dataset_sha256: Annotated[str | None, Form()] = None,
     strip_punctuation: Annotated[bool | None, Form()] = None,
     min_keyword_hits: Annotated[int | None, Form(ge=0, le=100)] = None,
     min_keyword_ratio: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
@@ -46,79 +55,82 @@ async def create_retrieval_evaluation(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
 
-    dataset_bytes = await dataset_file.read()
-    if not dataset_bytes:
-        raise HTTPException(status_code=422, detail="Dataset file is empty.")
+    if dataset_file is None and not dataset_sha256:
+        raise HTTPException(status_code=422, detail="Either dataset_file or dataset_sha256 is required.")
+    if dataset_file is not None and dataset_sha256:
+        raise HTTPException(status_code=422, detail="Provide either dataset_file or dataset_sha256, not both.")
 
-    config = RetrievalEvaluationRunConfig(
+    config = _build_config(
         k=k,
-        strip_punctuation=(
-            settings.evaluation_text_strip_punctuation
-            if strip_punctuation is None
-            else strip_punctuation
-        ),
-        min_keyword_hits=(
-            settings.evaluation_useful_chunk_min_keyword_hits
-            if min_keyword_hits is None
-            else min_keyword_hits
-        ),
-        min_keyword_ratio=(
-            settings.evaluation_useful_chunk_min_keyword_ratio
-            if min_keyword_ratio is None
-            else min_keyword_ratio
-        ),
-        store_retrieved_chunk_texts=(
-            settings.evaluation_store_retrieved_chunk_texts
-            if store_retrieved_chunk_texts is None
-            else store_retrieved_chunk_texts
-        ),
-        judge_enabled=(
-            settings.evaluation_judge_enabled if judge_enabled is None else judge_enabled
-        ),
-        rag_top_k=settings.rag_top_k,
-        rag_prefetch_k=settings.rag_prefetch_k,
-        embedding_provider=settings.embedding_provider,
-        embedding_model=settings.embedding_model,
-        reranker_enabled=settings.reranker_enabled,
-        reranker_model=settings.reranker_model,
-        judge_model=(
-            settings.evaluation_judge_model
-            if (settings.evaluation_judge_enabled if judge_enabled is None else judge_enabled)
-            else None
-        ),
+        strip_punctuation=strip_punctuation,
+        min_keyword_hits=min_keyword_hits,
+        min_keyword_ratio=min_keyword_ratio,
+        store_retrieved_chunk_texts=store_retrieved_chunk_texts,
+        judge_enabled=judge_enabled,
     )
     try:
-        result = await evaluation_service.create_run_from_upload(
-            owner_user_id=current_user.id,
-            file_id=file_id,
-            dataset_name=dataset_file.filename or "dataset.jsonl",
-            dataset_bytes=dataset_bytes,
-            config=config,
-        )
+        if dataset_file is not None:
+            dataset_bytes = await dataset_file.read()
+            if not dataset_bytes:
+                raise HTTPException(status_code=422, detail="Dataset file is empty.")
+            result = await evaluation_service.create_run_from_upload(
+                owner_user_id=current_user.id,
+                file_id=file_id,
+                dataset_name=dataset_file.filename or "dataset.jsonl",
+                dataset_bytes=dataset_bytes,
+                config=config,
+            )
+        else:
+            try:
+                result = await evaluation_service.create_run_from_existing_dataset(
+                    owner_user_id=current_user.id,
+                    file_id=file_id,
+                    dataset_sha256=str(dataset_sha256),
+                    config=config,
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="Dataset not found.") from exc
     except DatasetValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     background_tasks.add_task(evaluation_service.process_run, run_id=result.run_id)
     run = await evaluation_service.get_run(owner_user_id=current_user.id, run_id=result.run_id)
     if run is None:
         raise HTTPException(status_code=500, detail="Evaluation run could not be loaded.")
-    return EvaluationRunDetailResponse(status="accepted", item=_to_run_item(run=run))
+    return EvaluationRunDetailResponse(
+        status="accepted",
+        item=_to_run_item(run=run, document=document),
+    )
 
 
 @router.get("/evaluations", response_model=EvaluationRunListResponse)
 async def list_evaluations(
     current_user: ActiveUserDep,
+    documents_repository: DocumentsRepositoryDep,
     evaluation_service: RetrievalEvaluationServiceDep,
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    runs = await evaluation_service.list_runs(
+    runs, total = await evaluation_service.list_runs(
         owner_user_id=current_user.id,
         limit=limit,
         offset=offset,
     )
+    document_lookup = await _load_document_lookup(
+        documents_repository=documents_repository,
+        owner_user_id=current_user.id,
+        doc_ids=[run.doc_id for run in runs],
+    )
     return EvaluationRunListResponse(
         status="ok",
-        items=[_to_run_item(run=run) for run in runs],
+        items=[
+            _to_run_item(
+                run=run,
+                document=document_lookup.get(run.doc_id),
+            )
+            for run in runs
+        ],
+        total=total,
         limit=limit,
         offset=offset,
     )
@@ -128,12 +140,36 @@ async def list_evaluations(
 async def get_evaluation(
     run_id: UUID,
     current_user: ActiveUserDep,
+    documents_repository: DocumentsRepositoryDep,
     evaluation_service: RetrievalEvaluationServiceDep,
 ):
     run = await evaluation_service.get_run(owner_user_id=current_user.id, run_id=run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Evaluation run not found.")
-    return EvaluationRunDetailResponse(status="ok", item=_to_run_item(run=run))
+    document = await documents_repository.get_owned_document(
+        owner_user_id=current_user.id,
+        doc_id=run.doc_id,
+        include_deleted=True,
+    )
+    return EvaluationRunDetailResponse(
+        status="ok",
+        item=_to_run_item(run=run, document=document),
+    )
+
+
+@router.delete("/evaluations/{run_id}", response_model=EvaluationRunDeleteResponse)
+async def delete_evaluation(
+    run_id: UUID,
+    current_user: ActiveUserDep,
+    evaluation_service: RetrievalEvaluationServiceDep,
+):
+    deleted = await evaluation_service.delete_run(
+        owner_user_id=current_user.id,
+        run_id=run_id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Evaluation run not found.")
+    return EvaluationRunDeleteResponse(status="ok", run_id=run_id, deleted=True)
 
 
 @router.get("/evaluations/{run_id}/cases", response_model=EvaluationCaseListResponse)
@@ -141,7 +177,7 @@ async def list_evaluation_cases(
     run_id: UUID,
     current_user: ActiveUserDep,
     evaluation_service: RetrievalEvaluationServiceDep,
-    limit: int = Query(default=20, ge=1, le=200),
+    limit: int = Query(default=100, ge=1, le=5000),
     offset: int = Query(default=0, ge=0),
 ):
     run = await evaluation_service.get_run(owner_user_id=current_user.id, run_id=run_id)
@@ -191,7 +227,165 @@ async def list_evaluation_cases(
     )
 
 
-def _to_run_item(*, run) -> EvaluationRunItem:
+@router.get("/evaluation-datasets", response_model=EvaluationDatasetListResponse)
+async def list_evaluation_datasets(
+    current_user: ActiveUserDep,
+    evaluation_service: RetrievalEvaluationServiceDep,
+):
+    datasets = await evaluation_service.list_datasets(owner_user_id=current_user.id)
+    return EvaluationDatasetListResponse(
+        status="ok",
+        items=[_to_dataset_item(item) for item in datasets],
+    )
+
+
+@router.get("/evaluation-datasets/{dataset_sha256}", response_model=EvaluationDatasetPreviewResponse)
+async def preview_evaluation_dataset(
+    dataset_sha256: str,
+    current_user: ActiveUserDep,
+    evaluation_service: RetrievalEvaluationServiceDep,
+    sample_limit: int = Query(default=10, ge=1, le=50),
+):
+    payload = await evaluation_service.preview_dataset(
+        owner_user_id=current_user.id,
+        dataset_sha256=dataset_sha256,
+        sample_limit=sample_limit,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    dataset, sample_items = payload
+    return EvaluationDatasetPreviewResponse(
+        status="ok",
+        item=_to_dataset_item(dataset),
+        sample_items=[
+            EvaluationDatasetPreviewItem(
+                question=item.question,
+                answer=item.answer,
+                must_include_keywords=item.must_include_keywords,
+                must_include_phrases=item.must_include_phrases,
+                difficulty=item.difficulty,
+                category=item.category,
+            )
+            for item in sample_items
+        ],
+    )
+
+
+@router.get("/evaluation-datasets/{dataset_sha256}/download")
+async def download_evaluation_dataset(
+    dataset_sha256: str,
+    current_user: ActiveUserDep,
+    evaluation_service: RetrievalEvaluationServiceDep,
+):
+    payload = await evaluation_service.get_dataset_bytes(
+        owner_user_id=current_user.id,
+        dataset_sha256=dataset_sha256,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    dataset, _dataset_bytes = payload
+    return FileResponse(
+        path=Path(dataset.dataset_path),
+        media_type="application/x-ndjson",
+        filename=dataset.dataset_name,
+    )
+
+
+@router.delete("/evaluation-datasets/{dataset_sha256}", response_model=EvaluationDatasetDeleteResponse)
+async def delete_evaluation_dataset(
+    dataset_sha256: str,
+    current_user: ActiveUserDep,
+    evaluation_service: RetrievalEvaluationServiceDep,
+):
+    deleted = await evaluation_service.delete_dataset(
+        owner_user_id=current_user.id,
+        dataset_sha256=dataset_sha256,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+    return EvaluationDatasetDeleteResponse(
+        status="ok",
+        dataset_sha256=dataset_sha256,
+        deleted=True,
+    )
+
+
+def _build_config(
+    *,
+    k: int,
+    strip_punctuation: bool | None,
+    min_keyword_hits: int | None,
+    min_keyword_ratio: float | None,
+    store_retrieved_chunk_texts: bool | None,
+    judge_enabled: bool | None,
+) -> RetrievalEvaluationRunConfig:
+    resolved_judge_enabled = (
+        settings.evaluation_judge_enabled if judge_enabled is None else judge_enabled
+    )
+    return RetrievalEvaluationRunConfig(
+        k=k,
+        strip_punctuation=(
+            settings.evaluation_text_strip_punctuation
+            if strip_punctuation is None
+            else strip_punctuation
+        ),
+        min_keyword_hits=(
+            settings.evaluation_useful_chunk_min_keyword_hits
+            if min_keyword_hits is None
+            else min_keyword_hits
+        ),
+        min_keyword_ratio=(
+            settings.evaluation_useful_chunk_min_keyword_ratio
+            if min_keyword_ratio is None
+            else min_keyword_ratio
+        ),
+        store_retrieved_chunk_texts=(
+            settings.evaluation_store_retrieved_chunk_texts
+            if store_retrieved_chunk_texts is None
+            else store_retrieved_chunk_texts
+        ),
+        judge_enabled=resolved_judge_enabled,
+        rag_top_k=settings.rag_top_k,
+        rag_prefetch_k=settings.rag_prefetch_k,
+        embedding_provider=settings.embedding_provider,
+        embedding_model=settings.embedding_model,
+        reranker_enabled=settings.reranker_enabled,
+        reranker_model=settings.reranker_model,
+        judge_model=(
+            settings.evaluation_judge_model if resolved_judge_enabled else None
+        ),
+    )
+
+
+async def _load_document_lookup(
+    *,
+    documents_repository,
+    owner_user_id,
+    doc_ids: list[str],
+) -> dict[str, object]:
+    unique_doc_ids = list(dict.fromkeys(doc_ids))
+    if not unique_doc_ids:
+        return {}
+    if hasattr(documents_repository, "list_owned_documents_by_ids"):
+        items = await documents_repository.list_owned_documents_by_ids(
+            owner_user_id=owner_user_id,
+            doc_ids=unique_doc_ids,
+            include_deleted=True,
+        )
+        return {item.id: item for item in items}
+    lookup = {}
+    for doc_id in unique_doc_ids:
+        item = await documents_repository.get_owned_document(
+            owner_user_id=owner_user_id,
+            doc_id=doc_id,
+            include_deleted=True,
+        )
+        if item is not None:
+            lookup[item.id] = item
+    return lookup
+
+
+def _to_run_item(*, run, document=None) -> EvaluationRunItem:
     grouped_summary = {
         bucket_name: {
             key: data
@@ -202,6 +396,8 @@ def _to_run_item(*, run) -> EvaluationRunItem:
     return EvaluationRunItem(
         run_id=run.id,
         file_id=run.doc_id,
+        document_name=getattr(document, "source", None),
+        chunking_strategy=getattr(document, "chunking_strategy", None),
         status=run.status,
         evaluation_type=run.evaluation_type,
         dataset_name=run.dataset_name,
@@ -223,4 +419,18 @@ def _to_run_item(*, run) -> EvaluationRunItem:
             keyword_coverage_avg=run.keyword_coverage_avg,
             context_relevance_score_avg=run.context_relevance_score_avg,
         ),
+    )
+
+
+def _to_dataset_item(dataset) -> EvaluationDatasetItem:
+    return EvaluationDatasetItem(
+        dataset_sha256=dataset.dataset_sha256,
+        dataset_name=dataset.dataset_name,
+        file_name=dataset.dataset_name,
+        total_cases=dataset.total_cases,
+        categories=dataset.categories,
+        difficulties=dataset.difficulties,
+        created_at=dataset.created_at,
+        last_used_at=dataset.last_used_at,
+        run_count=dataset.run_count,
     )

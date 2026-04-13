@@ -28,6 +28,8 @@ class EvaluationGroupedBucket(BaseModel):
 class EvaluationRunItem(BaseModel):
     run_id: UUID
     file_id: str
+    document_name: str | None = None
+    chunking_strategy: str | None = None
     status: str
     evaluation_type: str
     dataset_name: str
@@ -47,6 +49,7 @@ class EvaluationRunItem(BaseModel):
 class EvaluationRunListResponse(BaseModel):
     status: str
     items: list[EvaluationRunItem] = Field(default_factory=list)
+    total: int
     limit: int
     offset: int
 
@@ -90,3 +93,47 @@ class EvaluationCaseListResponse(BaseModel):
     limit: int
     offset: int
     items: list[EvaluationCaseItem] = Field(default_factory=list)
+
+
+class EvaluationRunDeleteResponse(BaseModel):
+    status: str
+    run_id: UUID
+    deleted: bool
+
+
+class EvaluationDatasetPreviewItem(BaseModel):
+    question: str
+    answer: str
+    must_include_keywords: list[str] = Field(default_factory=list)
+    must_include_phrases: list[str] = Field(default_factory=list)
+    difficulty: str | None = None
+    category: str | None = None
+
+
+class EvaluationDatasetItem(BaseModel):
+    dataset_sha256: str
+    dataset_name: str
+    file_name: str
+    total_cases: int
+    categories: list[str] = Field(default_factory=list)
+    difficulties: list[str] = Field(default_factory=list)
+    created_at: datetime
+    last_used_at: datetime
+    run_count: int
+
+
+class EvaluationDatasetListResponse(BaseModel):
+    status: str
+    items: list[EvaluationDatasetItem] = Field(default_factory=list)
+
+
+class EvaluationDatasetPreviewResponse(BaseModel):
+    status: str
+    item: EvaluationDatasetItem
+    sample_items: list[EvaluationDatasetPreviewItem] = Field(default_factory=list)
+
+
+class EvaluationDatasetDeleteResponse(BaseModel):
+    status: str
+    dataset_sha256: str
+    deleted: bool

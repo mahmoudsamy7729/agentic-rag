@@ -1,0 +1,233 @@
+{% extends "evaluation_base.html" %}
+
+{% block title %}Datasets{% endblock %}
+{% block page_title %}Datasets{% endblock %}
+{% block page_subtitle %}Manage reusable evaluation datasets, preview sample rows, and jump directly into new evaluation runs.{% endblock %}
+
+{% block page_actions %}
+  <a href="/evaluations-create-ui" class="button">New Evaluation</a>
+{% endblock %}
+
+{% block content %}
+  <section class="summary-grid">
+    <article class="summary-card"><div class="label">Total datasets</div><div id="datasetsCount" class="value">-</div><div class="sub">Reusable uploads available now</div></article>
+    <article class="summary-card"><div class="label">Examples</div><div id="datasetsExamples" class="value">-</div><div class="sub">Total examples across stored datasets</div></article>
+    <article class="summary-card"><div class="label">Categories</div><div id="datasetsCategories" class="value">-</div><div class="sub">Distinct category labels</div></article>
+    <article class="summary-card"><div class="label">Difficulties</div><div id="datasetsDifficulties" class="value">-</div><div class="sub">Distinct difficulty labels</div></article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-inner">
+      <div class="table-toolbar">
+        <div class="field" style="min-width:300px;">
+          <label for="datasetSearch">Search</label>
+          <input id="datasetSearch" type="text" placeholder="Dataset name, category, or difficulty" />
+        </div>
+        <div class="inline-actions">
+          <button id="refreshDatasetsBtn" type="button" class="ghost-button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Dataset name</th>
+              <th>File name</th>
+              <th>Examples</th>
+              <th>Created</th>
+              <th>Categories coverage</th>
+              <th>Difficulties coverage</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="datasetsBody">
+            <tr><td colspan="7" class="loading-state">Loading datasets...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div id="datasetPreviewBackdrop" class="modal-backdrop"></div>
+  <section id="datasetPreviewModal" class="modal" aria-hidden="true">
+    <div class="panel-head">
+      <div>
+        <h3 id="datasetPreviewTitle">Dataset preview</h3>
+        <p id="datasetPreviewMeta">Loading preview...</p>
+      </div>
+      <button id="closeDatasetPreviewBtn" type="button" class="icon-button close-button">Close</button>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Answer</th>
+            <th>Category</th>
+            <th>Difficulty</th>
+          </tr>
+        </thead>
+        <tbody id="datasetPreviewBody">
+          <tr><td colspan="4" class="loading-state">Preview will appear here.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const datasetState = {
+    items: [],
+    filtered: [],
+  };
+
+  const datasetEl = {
+    datasetsCount: document.getElementById("datasetsCount"),
+    datasetsExamples: document.getElementById("datasetsExamples"),
+    datasetsCategories: document.getElementById("datasetsCategories"),
+    datasetsDifficulties: document.getElementById("datasetsDifficulties"),
+    datasetSearch: document.getElementById("datasetSearch"),
+    refreshDatasetsBtn: document.getElementById("refreshDatasetsBtn"),
+    datasetsBody: document.getElementById("datasetsBody"),
+    datasetPreviewBackdrop: document.getElementById("datasetPreviewBackdrop"),
+    datasetPreviewModal: document.getElementById("datasetPreviewModal"),
+    datasetPreviewTitle: document.getElementById("datasetPreviewTitle"),
+    datasetPreviewMeta: document.getElementById("datasetPreviewMeta"),
+    datasetPreviewBody: document.getElementById("datasetPreviewBody"),
+    closeDatasetPreviewBtn: document.getElementById("closeDatasetPreviewBtn"),
+  };
+
+  async function loadDatasets() {
+    const payload = await window.uiAuth.apiFetch("/evaluation-datasets");
+    datasetState.items = payload.items || [];
+    applyDatasetFilter();
+  }
+
+  function applyDatasetFilter() {
+    const search = datasetEl.datasetSearch.value.trim().toLowerCase();
+    datasetState.filtered = datasetState.items.filter(function (item) {
+      const haystack = [
+        item.dataset_name,
+        item.file_name,
+        (item.categories || []).join(" "),
+        (item.difficulties || []).join(" "),
+      ].join(" ").toLowerCase();
+      return !search || haystack.indexOf(search) !== -1;
+    });
+    renderDatasetSummary();
+    renderDatasetTable();
+  }
+
+  function renderDatasetSummary() {
+    const categories = new Set();
+    const difficulties = new Set();
+    let examples = 0;
+    datasetState.filtered.forEach(function (item) {
+      examples += Number(item.total_cases || 0);
+      (item.categories || []).forEach(function (value) { categories.add(value); });
+      (item.difficulties || []).forEach(function (value) { difficulties.add(value); });
+    });
+    datasetEl.datasetsCount.textContent = window.evalAdmin.formatCount(datasetState.filtered.length);
+    datasetEl.datasetsExamples.textContent = window.evalAdmin.formatCount(examples);
+    datasetEl.datasetsCategories.textContent = window.evalAdmin.formatCount(categories.size);
+    datasetEl.datasetsDifficulties.textContent = window.evalAdmin.formatCount(difficulties.size);
+  }
+
+  function renderDatasetTable() {
+    if (!datasetState.filtered.length) {
+      datasetEl.datasetsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No datasets match the current search.</td></tr>';
+      return;
+    }
+    datasetEl.datasetsBody.innerHTML = datasetState.filtered.map(function (item) {
+      return [
+        "<tr>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.dataset_name) + "</td>",
+        "  <td class='mono'>" + window.evalAdmin.escapeHtml(item.file_name) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.total_cases) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(window.evalAdmin.formatDateTime(item.created_at)) + "</td>",
+        "  <td><div class='chip-list'>" + window.evalAdmin.chips(item.categories, "No categories") + "</div></td>",
+        "  <td><div class='chip-list'>" + window.evalAdmin.chips(item.difficulties, "No difficulties") + "</div></td>",
+        '  <td><div class="table-actions">',
+        '    <button type="button" class="secondary-button" data-preview-dataset="' + window.evalAdmin.escapeHtml(item.dataset_sha256) + '">Preview</button>',
+        '    <a class="ghost-button" href="/evaluations-create-ui?dataset_sha256=' + encodeURIComponent(item.dataset_sha256) + '">Use in new evaluation</a>',
+        '    <a class="ghost-button" href="' + window.evalAdmin.downloadUrl(item.dataset_sha256) + '">Download</a>',
+        '    <button type="button" class="danger-button" data-delete-dataset="' + window.evalAdmin.escapeHtml(item.dataset_sha256) + '">Delete</button>',
+        "  </div></td>",
+        "</tr>",
+      ].join("");
+    }).join("");
+  }
+
+  async function openPreview(datasetSha) {
+    datasetEl.datasetPreviewBackdrop.classList.add("is-open");
+    datasetEl.datasetPreviewModal.classList.add("is-open");
+    datasetEl.datasetPreviewModal.setAttribute("aria-hidden", "false");
+    datasetEl.datasetPreviewBody.innerHTML = '<tr><td colspan="4" class="loading-state">Loading preview...</td></tr>';
+    const payload = await window.uiAuth.apiFetch("/evaluation-datasets/" + encodeURIComponent(datasetSha) + "?sample_limit=12");
+    datasetEl.datasetPreviewTitle.textContent = payload.item.dataset_name;
+    datasetEl.datasetPreviewMeta.textContent =
+      payload.item.total_cases + " examples | categories: " + (payload.item.categories.join(", ") || "none") +
+      " | difficulties: " + (payload.item.difficulties.join(", ") || "none");
+    datasetEl.datasetPreviewBody.innerHTML = (payload.sample_items || []).map(function (item) {
+      return [
+        "<tr>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.question) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.answer) + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.category || "-") + "</td>",
+        "  <td>" + window.evalAdmin.escapeHtml(item.difficulty || "-") + "</td>",
+        "</tr>",
+      ].join("");
+    }).join("") || '<tr><td colspan="4" class="empty-state">No sample rows available.</td></tr>';
+  }
+
+  function closePreview() {
+    datasetEl.datasetPreviewBackdrop.classList.remove("is-open");
+    datasetEl.datasetPreviewModal.classList.remove("is-open");
+    datasetEl.datasetPreviewModal.setAttribute("aria-hidden", "true");
+  }
+
+  async function deleteDataset(datasetSha) {
+    await window.uiAuth.apiFetch("/evaluation-datasets/" + encodeURIComponent(datasetSha), {
+      method: "DELETE",
+    });
+    await loadDatasets();
+  }
+
+  datasetEl.datasetSearch.addEventListener("input", applyDatasetFilter);
+  datasetEl.refreshDatasetsBtn.addEventListener("click", loadDatasets);
+  datasetEl.closeDatasetPreviewBtn.addEventListener("click", closePreview);
+  datasetEl.datasetPreviewBackdrop.addEventListener("click", closePreview);
+  datasetEl.datasetsBody.addEventListener("click", async function (event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const previewDataset = target.getAttribute("data-preview-dataset");
+    if (previewDataset) {
+      try {
+        await openPreview(previewDataset);
+      } catch (err) {
+        datasetEl.datasetPreviewMeta.textContent = String(err && err.message ? err.message : err);
+      }
+      return;
+    }
+    const deleteDatasetSha = target.getAttribute("data-delete-dataset");
+    if (deleteDatasetSha) {
+      if (!window.confirm("Delete this reusable dataset from storage? Existing historical runs will remain.")) return;
+      try {
+        await deleteDataset(deleteDatasetSha);
+      } catch (err) {
+        datasetEl.datasetsBody.innerHTML = '<tr><td colspan="7" class="error-state">' + window.evalAdmin.escapeHtml(String(err && err.message ? err.message : err)) + "</td></tr>";
+      }
+    }
+  });
+
+  (async function init() {
+    try {
+      await loadDatasets();
+    } catch (err) {
+      datasetEl.datasetsBody.innerHTML = '<tr><td colspan="7" class="error-state">' + window.evalAdmin.escapeHtml(String(err && err.message ? err.message : err)) + "</td></tr>";
+    }
+  })();
+</script>
+{% endblock %}

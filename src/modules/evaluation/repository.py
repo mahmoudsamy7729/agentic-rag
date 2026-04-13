@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,6 +57,24 @@ class EvaluationRepository:
             .order_by(EvaluationRun.created_at.desc())
             .offset(offset)
             .limit(limit)
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_owned_runs(self, *, owner_user_id: UUID) -> int:
+        stmt = (
+            select(func.count(EvaluationRun.id))
+            .select_from(EvaluationRun)
+            .where(EvaluationRun.owner_user_id == owner_user_id)
+        )
+        result = await self._session.execute(stmt)
+        return int(result.scalar_one())
+
+    async def list_all_owned_runs(self, *, owner_user_id: UUID) -> list[EvaluationRun]:
+        stmt = (
+            select(EvaluationRun)
+            .where(EvaluationRun.owner_user_id == owner_user_id)
+            .order_by(EvaluationRun.created_at.desc())
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
@@ -185,6 +203,15 @@ class EvaluationRepository:
         run.error_message = error_message
         run.finished_at = datetime.now(timezone.utc)
         await self._session.flush()
+
+    async def delete_owned_run(self, *, owner_user_id: UUID, run_id: UUID) -> bool:
+        stmt = delete(EvaluationRun).where(
+            EvaluationRun.id == run_id,
+            EvaluationRun.owner_user_id == owner_user_id,
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return bool(result.rowcount)
 
     async def commit(self) -> None:
         await self._session.commit()

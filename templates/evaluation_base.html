@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Retrieval Evaluation{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/admin_eval.css" />
+  {% block extra_head %}{% endblock %}
+</head>
+<body data-eval-page="{{ active_eval_nav }}">
+  <div class="admin-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-kicker">Admin</span>
+        <h1>Retrieval Evaluation</h1>
+        <p>Runs, datasets, live monitoring, and cross-run comparison for the retrieval stack.</p>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="/evaluations-ui" class="{% if active_eval_nav == 'runs' %}active{% endif %}">
+          <span>Evaluation Runs</span>
+          <span class="mono">/1</span>
+        </a>
+        <a href="/evaluations-create-ui" class="{% if active_eval_nav == 'new' %}active{% endif %}">
+          <span>New Evaluation</span>
+          <span class="mono">/2</span>
+        </a>
+        <a href="/evaluation-datasets-ui" class="{% if active_eval_nav == 'datasets' %}active{% endif %}">
+          <span>Datasets</span>
+          <span class="mono">/3</span>
+        </a>
+        <a href="/evaluations-compare-ui" class="{% if active_eval_nav == 'compare' %}active{% endif %}">
+          <span>Compare Runs</span>
+          <span class="mono">/4</span>
+        </a>
+      </nav>
+
+      <div>
+        <div class="sidebar-section-label">Other Views</div>
+        <div class="sidebar-links">
+          <a href="/documents-ui">Documents</a>
+          <a href="/ask-ui">Ask</a>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="logoutBtn" type="button" class="logout-btn">Logout</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <div class="page">
+        <header class="page-head">
+          <div>
+            <h2>{% block page_title %}Retrieval Evaluation{% endblock %}</h2>
+            <p>{% block page_subtitle %}{% endblock %}</p>
+          </div>
+          <div class="page-head-actions">
+            {% block page_actions %}{% endblock %}
+          </div>
+        </header>
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/ui_auth.js"></script>
+  <script src="/static/js/admin_eval_common.js"></script>
+  <script>
+    window.uiAuth.requireAuthOrRedirect();
+    document.getElementById("logoutBtn").addEventListener("click", function () {
+      window.uiAuth.logout();
+    });
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>
